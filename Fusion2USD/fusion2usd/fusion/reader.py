@@ -52,19 +52,18 @@ class LinkBuilder:
             out.extend(self._root_bodies if key == ROOT else self._occ[key].bodies)
         return out
 
-    def _root_group_name(self, group: Group) -> str:
-        """The root frame anchors the grounded group, but a member occurrence names it better than the
-        root component (which is the document name, e.g. "(Unsaved)")."""
-        members = [self._occ[k].entity for k in group.members if k != ROOT]
-        return members[0].name if members else "base"
+    def _root_group_member(self, group: Group):
+        """The root frame anchors the grounded group, but a member occurrence identifies it better than
+        the root component (which carries the document name, e.g. "(Unsaved)")."""
+        return next((self._occ[k].entity for k in group.members if k != ROOT), None)
 
     def build(self, group: Group) -> Link:
         anchor = None if group.anchor == ROOT else self._occ[group.anchor].entity
-        root_name = self._root.name or "base"
-        name = _unique(anchor.name if anchor is not None else self._root_group_name(group), self._names)
+        identity = anchor or self._root_group_member(group)  # names the link; None: root bodies only
+        name = _unique(identity.name if identity is not None else "base", self._names)
         transform = Transform() if group.contains_root else transform_m(anchor.transform2)
         link = Link(name=name, transform=transform,
-                    source=root_name if anchor is None else anchor.fullPathName,
+                    source=identity.fullPathName if identity is not None else (self._root.name or "base"),
                     metadata=self._metadata(group, anchor))
         bodies = self.bodies(group)
         mass = self._mass.compute(bodies, f"link {name!r}")

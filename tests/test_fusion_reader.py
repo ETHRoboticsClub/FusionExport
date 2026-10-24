@@ -357,3 +357,20 @@ def test_unknown_sensor_kind_warns_and_duplicate_names_get_suffix(adsk):
     _, model, report = _read_with_origins(adsk, origins)
     assert [(s.name, s.link) for s in model.sensors] == [("s", "arm:1"), ("s_2", "wheel:1")]
     assert any("unknown sensor kind 'lidar'" in w for w in report.warnings)
+
+
+def test_grounded_group_with_root_bodies_is_named_after_its_occurrence(adsk):
+    """Root bodies put the root frame into the grounded group; the link must still be called base:1
+    (live Fusion named it after the document, "(Unsaved)")."""
+    core = adsk["adsk.core"]
+    core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty
+    from fusion2usd.fusion.reader import FusionDesignReader
+
+    design, _ = build_design(adsk)
+    design.rootComponent.name = "(Unsaved)"
+    design.rootComponent.bRepBodies = Coll([Body("floor", Vec3(-1, -1, -0.1), Vec3(1, 1, 0), 5.0, Vec3(0, 0, -0.05))])
+    model = FusionDesignReader(design, ExportOptions(probe_joints=False), ExportReport()).read()
+    base = model.links["base:1"]
+    assert base.source == "base:1" and base.transform.is_close(Transform())  # root frame anchors it
+    assert "(Unsaved)" not in model.links
+    assert sorted(m.name for m in base.visuals) == ["floor", "plate"]  # root bodies joined the base link
