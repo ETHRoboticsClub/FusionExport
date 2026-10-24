@@ -19,6 +19,7 @@ class PropertiesCommand(CommandBase):
     selection_filters: Sequence[str] = ()
     prompt = "Select an entity"
     float_fields: Sequence[Tuple[str, str]] = ()    # (attribute name, label)
+    int_fields: Sequence[Tuple[str, str]] = ()
     text_fields: Sequence[Tuple[str, str]] = ()
     dropdowns: Sequence[Tuple[str, str, Sequence[Choice]]] = ()  # (attribute name, label, choices)
     checkboxes: Sequence[Tuple[str, str]] = ()      # stored as "true" or removed
@@ -33,7 +34,7 @@ class PropertiesCommand(CommandBase):
         for f in self.selection_filters:
             sel.addSelectionFilter(f)
         sel.setSelectionLimits(1, 1)
-        for name, label in (*self.text_fields, *self.float_fields):
+        for name, label in self._string_fields():
             inputs.addStringValueInput(name, label, "")
         for name, label, choices in self.dropdowns:
             add_dropdown(inputs, name, label, choices, choices[0][1])
@@ -64,13 +65,16 @@ class PropertiesCommand(CommandBase):
         self._writer.write(entity, self._values(inputs))
 
     # -- helpers
+    def _string_fields(self) -> Tuple[Tuple[str, str], ...]:
+        return (*self.text_fields, *self.float_fields, *self.int_fields)
+
     @staticmethod
     def _selected(inputs: Any) -> Optional[Any]:
         sel = inputs.itemById("entity")
         return sel.selection(0).entity if sel is not None and sel.selectionCount else None
 
     def _prefill(self, inputs: Any, raw: Dict[str, str]) -> None:
-        for name, _ in (*self.text_fields, *self.float_fields):
+        for name, _ in self._string_fields():
             inputs.itemById(name).value = raw.get(name, "")
         for name, _, choices in self.dropdowns:
             current = raw.get(name, "")
@@ -90,6 +94,9 @@ class PropertiesCommand(CommandBase):
         for name, _ in self.float_fields:
             number = optional_float(string_value(inputs, name))
             values[name] = None if number is None else repr(number)
+        for name, _ in self.int_fields:
+            text = string_value(inputs, name)
+            values[name] = str(int(text)) if text else None
         for name, _, choices in self.dropdowns:
             values[name] = dropdown_value(inputs, name, choices) or None
         for name, _ in self.checkboxes:
@@ -138,3 +145,73 @@ class LinkPropertiesCommand(PropertiesCommand):
     float_fields = (("mass", "Mass override (kg)"),)
     dropdowns = (("collision_approximation", "Collision approximation",
                   [("Default", "")] + [(a.value, a.value) for a in CollisionApproximation]),)
+
+
+SENSOR_KINDS = [("Camera", "camera"), ("IMU", "imu"), ("Contact", "contact"), ("Frame", "frame"), ("None", "")]
+# Fields shown per sensor kind; hidden fields are removed on OK.
+SENSOR_FIELDS: Dict[str, Tuple[str, ...]] = {
+    "camera": ("width", "height", "fov", "focal_length", "horizontal_aperture", "near", "far", "rate",
+               "data_types", JSON_KEY),
+    "imu": ("rate", JSON_KEY),
+    "contact": ("rate", "history_length", "track_air_time", "force_threshold", JSON_KEY),
+    "frame": (JSON_KEY,),
+    "": (),
+}
+
+
+class SensorPropertiesCommand(PropertiesCommand):
+    id = "fusion2usd_sensor_properties"
+    name = "USD Sensor Properties"
+    tooltip = ("Tag a joint origin as a camera, IMU, contact sensor or named frame for the USD export "
+               "(cameras look along +Z, X right, Y down; SI units, empty = default).")
+    selection_filters = ("JointOrigins",)
+    prompt = "Select a joint origin"
+    text_fields = (("data_types", "Data types (e.g. rgb,depth)"),)
+    int_fields = (
+        ("width", "Width (px)"),
+        ("height", "Height (px)"),
+        ("history_length", "History length"),
+    )
+    float_fields = (
+        ("fov", "Horizontal FOV (deg)"),
+        ("focal_length", "Focal length"),
+        ("horizontal_aperture", "Horizontal aperture"),
+        ("near", "Near clip (m)"),
+        ("far", "Far clip (m)"),
+        ("rate", "Update rate (Hz)"),
+        ("force_threshold", "Force threshold (N)"),
+    )
+    dropdowns = (
+        ("sensor", "Type", SENSOR_KINDS),
+        ("track_air_time", "Track air time", TRI_STATE),
+    )
+
+    def on_create(self, command: Any, inputs: Any) -> None:
+        super().on_create(command, inputs)
+        self._update_visibility(inputs)
+
+    def on_input_changed(self, changed: Any, inputs: Any) -> None:
+        super().on_input_changed(changed, inputs)
+        if changed.id in ("entity", "sensor"):
+            self._update_visibility(inputs)
+
+    def _values(self, inputs: Any) -> Dict[str, Optional[str]]:
+        values = super()._values(inputs)
+        if not self._kind(inputs):  # None: drop every fusion2usd attribute, including unknown ones
+            entity = self._selected(inputs)
+            values.update(dict.fromkeys(self._reader.read_raw(entity) if entity is not None else ()))
+        shown = SENSOR_FIELDS[self._kind(inputs)]
+        return {k: (v if k == "sensor" or k in shown else None) for k, v in values.items()}
+
+    def _update_visibility(self, inputs: Any) -> None:
+        shown = SENSOR_FIELDS[self._kind(inputs)]
+        for name in self._field_names():
+            inputs.itemById(name).isVisible = name in shown
+
+    @staticmethod
+    def _kind(inputs: Any) -> str:
+        return dropdown_value(inputs, "sensor", SENSOR_KINDS)
+
+    def _field_names(self) -> Tuple[str, ...]:
+        names = [n for n, _ in self._string_fields()] + [n for n, _, _ in self.dropdowns if n != "sensor"]
+        return (*names, JSON_KEY)

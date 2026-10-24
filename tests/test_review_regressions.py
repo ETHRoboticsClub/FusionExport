@@ -35,8 +35,8 @@ def test_asset_origin_is_upright_base_and_cfg_keeps_placement(tmp_path):
     assert (hi.z - lo.z) == pytest.approx(0.1) and (hi.y - lo.y) == pytest.approx(0.1)
     src = IsaacLabCfgWriter(opts, report).render(model, str(tmp_path / "r.usda"), str(tmp_path / "r_cfg.py"))
     pos = [float(v) for v in re.search(r"pos=\(([^)]*)\)", src).group(1).split(",")]
-    rot = [float(v) for v in re.search(r"rot=\(([^)]*)\)", src).group(1).split(",")]
-    assert pos == pytest.approx([0, 0, 0.3]) and rot == pytest.approx([1, 0, 0, 0])
+    assert pos == pytest.approx([0, 0, 0.3])
+    assert "rot=" not in src  # identity by construction; avoids the 2.x/3.x quaternion-order change
 
 
 def test_reversed_pin_slot_keeps_slot_in_fusion_parent_and_effort_on_rotation():

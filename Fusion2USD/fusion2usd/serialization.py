@@ -8,7 +8,8 @@ from typing import Any, Dict, Optional
 from .core.inertia import MassProperties
 from .core.math3d import Quat, Transform, Vec3
 from .model.robot import (
-    Coupling, Dof, DofRef, DofType, Joint, JointProperties, Limit, Link, Material, Mesh, RobotModel,
+    Coupling, Dof, DofRef, DofType, Joint, JointProperties, Limit, Link, Material, Mesh, RobotModel, Sensor,
+    SensorKind,
 )
 
 FORMAT_VERSION = 1
@@ -44,6 +45,11 @@ class ModelSerializer:
             "materials": [vars(m).copy() for m in model.materials.values()],
             "links": [self._link(l) for l in model.links.values()],
             "joints": [self._joint(j) for j in model.joints],
+            "sensors": [
+                {"name": s.name, "kind": s.kind.value, "link": s.link, "transform": _tf(s.transform),
+                 "params": s.params, "metadata": s.metadata, "source": s.source}
+                for s in model.sensors
+            ],
             "couplings": [
                 {"name": c.name, "leader": [c.leader.joint, c.leader.dof], "follower": [c.follower.joint, c.follower.dof],
                  "ratio": c.ratio, "offset": c.offset, "source": c.source}
@@ -67,6 +73,12 @@ class ModelSerializer:
             model.add_link(self._unlink(l))
         for j in d.get("joints", []):
             model.add_joint(self._unjoint(j))
+        for s in d.get("sensors", []):
+            params = dict(s.get("params", {}))
+            if "clipping_range" in params:
+                params["clipping_range"] = tuple(params["clipping_range"])
+            model.sensors.append(Sensor(s["name"], SensorKind(s["kind"]), s["link"], _untf(s["transform"]) or Transform(),
+                                        params, s.get("metadata", {}), s.get("source", "")))
         for c in d.get("couplings", []):
             model.couplings.append(Coupling(c["name"], DofRef(*c["leader"]), DofRef(*c["follower"]),
                                             c["ratio"], c.get("offset", 0.0), c.get("source", "")))

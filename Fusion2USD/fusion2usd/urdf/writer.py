@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..core.math3d import Quat, Transform, Vec3
 from ..core.report import ExportReport
-from ..model.robot import Joint, JointKind, Link, Mesh, RobotModel
+from ..model.robot import Joint, JointKind, Link, Mesh, RobotModel, Sensor, SensorKind
 from ..options import ExportOptions
 
 _FALLBACK_EFFORT = 1000.0
@@ -102,6 +102,8 @@ class UrdfWriter:
             written += self._write_link(robot, model.links[name], frames[name], mesh_dir, mesh_dir_name)
         for joint in joints:
             self._write_joint(robot, model, joint, frames)
+        for sensor in model.sensors:
+            self._write_sensor_frame(robot, sensor, frames)
 
         ET.indent(robot)
         ET.ElementTree(robot).write(path, encoding="utf-8", xml_declaration=True)
@@ -210,6 +212,18 @@ class UrdfWriter:
         if coupling is not None:
             ET.SubElement(el, "mimic", joint=coupling.leader.joint, multiplier=_fmt(coupling.ratio),
                           offset=_fmt(coupling.offset))
+
+    @staticmethod
+    def _write_sensor_frame(robot: ET.Element, sensor: Sensor, frames: Dict[str, Transform]) -> None:
+        """Cameras, IMUs and named frames become massless fixed child links (the usual ROS pattern)."""
+        if sensor.kind is SensorKind.CONTACT or sensor.link not in frames:
+            return
+        name = f"{sensor.name}_frame"
+        ET.SubElement(robot, "link", name=name)
+        joint = ET.SubElement(robot, "joint", name=f"{name}_joint", type="fixed")
+        ET.SubElement(joint, "parent", link=sensor.link)
+        ET.SubElement(joint, "child", link=name)
+        _origin(joint, frames[sensor.link].inverse() * sensor.transform)
 
     def _coupling_for(self, model: RobotModel, joint_name: str):
         if not self.options.export_mimic_joints:

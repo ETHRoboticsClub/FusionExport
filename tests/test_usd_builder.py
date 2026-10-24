@@ -198,13 +198,18 @@ def test_prismatic_mimic():
     assert pj.GetLowerLimitAttr().Get() == pytest.approx(0.0)
     assert pj.GetUpperLimitAttr().Get() == pytest.approx(0.1)
     assert rack.GetAttribute("state:linear:physics:position").Get() == pytest.approx(0.02)
-    assert "PhysxMimicJointAPI:transX" in rack.GetPrimTypeInfo().GetAppliedAPISchemas()
-    assert rack.GetRelationship("physxMimicJoint:transX:referenceJoint").GetTargets() == \
+    # Isaac Sim 6.2 PhysX only parses rot* mimic tokens, also on prismatic joints (verified on GPU)
+    assert "PhysxMimicJointAPI:rotX" in rack.GetPrimTypeInfo().GetAppliedAPISchemas()
+    assert rack.GetRelationship("physxMimicJoint:rotX:referenceJoint").GetTargets() == \
         [Sdf.Path("/rack_pinion/joints/wheel_joint")]
-    assert rack.GetAttribute("physxMimicJoint:transX:referenceJointAxis").Get() == "rotX"
+    assert rack.GetAttribute("physxMimicJoint:rotX:referenceJointAxis").Get() == "rotX"
     # prismatic follower, revolute leader: PhysX wants m/deg
-    assert rack.GetAttribute("physxMimicJoint:transX:gearing").Get() == pytest.approx(-0.05 / DEG)
-    assert rack.GetAttribute("physxMimicJoint:transX:offset").Get() == pytest.approx(-0.001)
+    assert rack.GetAttribute("physxMimicJoint:rotX:gearing").Get() == pytest.approx(-0.05 / DEG)
+    assert rack.GetAttribute("physxMimicJoint:rotX:offset").Get() == pytest.approx(-0.001)
+    # the continuous wheel leads a mimic: PhysX needs finite limits on it
+    wheel = UsdPhysics.RevoluteJoint(stage.GetPrimAtPath("/rack_pinion/joints/wheel_joint"))
+    assert (wheel.GetLowerLimitAttr().Get(), wheel.GetUpperLimitAttr().Get()) == (-3600.0, 3600.0)
+    assert any("finite limits" in w for w in report.warnings)
     assert not rack.HasAPI(UsdPhysics.DriveAPI)
     assert UsdPhysics.DriveAPI(stage.GetPrimAtPath("/rack_pinion/joints/wheel_joint"), "angular")
     # free body: plain rigid body without mass values

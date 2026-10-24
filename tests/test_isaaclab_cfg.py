@@ -57,17 +57,17 @@ def test_arm_cfg(fake_isaaclab, tmp_path):
     ns, _ = load(arm_model(), tmp_path, ExportOptions(drive=DriveDefaults(stiffness=20.0, damping=1.0)))
     cfg = ns["TEST_ARM_CFG"]
     assert os.path.normpath(cfg.spawn.usd_path) == str(tmp_path / "usd" / "robot.usd")
-    assert cfg.spawn.articulation_props.enabled_self_collisions is False
-    assert cfg.spawn.articulation_props.fix_root_link is None
+    # physics properties come from the USD; no deprecated (3.x) property cfgs are emitted
+    assert not hasattr(cfg.spawn, "articulation_props") and not hasattr(cfg.spawn, "rigid_props")
     assert cfg.init_state.joint_pos == {"shoulder": 0.3, "elbow": -0.5}
     groups = list(cfg.actuators.values())
     assert len(groups) == 2
     sh = next(g for g in groups if g.joint_names_expr == ["shoulder"])
-    assert (sh.effort_limit_sim, sh.velocity_limit_sim, sh.stiffness, sh.damping, sh.armature) == \
+    assert (sh.joint_effort_limit, sh.joint_velocity_limit, sh.stiffness, sh.damping, sh.armature) == \
         (10.0, 3.0, 100.0, 5.0, 0.01)
     el = next(g for g in groups if g.joint_names_expr == ["elbow"])
     assert (el.stiffness, el.damping) == (20.0, 1.0)
-    assert not hasattr(el, "effort_limit_sim") and not hasattr(el, "velocity_limit_sim")
+    assert not hasattr(el, "joint_effort_limit") and not hasattr(el, "joint_velocity_limit")
 
 
 def test_grouping_and_passive(fake_isaaclab, tmp_path):

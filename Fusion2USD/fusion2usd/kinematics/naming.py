@@ -17,6 +17,7 @@ class NamingPass(ModelPass):
         self._rename_links(model)
         self._rename_joints(model)
         self._rename_materials(model)
+        self._rename_sensors(model)
         for link in model.links.values():
             for meshes, fallback in ((link.visuals, "visual"), (link.collisions, "collision")):
                 registry = NameRegistry()
@@ -39,6 +40,8 @@ class NamingPass(ModelPass):
             j.parent, j.child = mapping.get(j.parent, j.parent), mapping.get(j.child, j.child)
         if model.base_link:
             model.base_link = mapping.get(model.base_link, model.base_link)
+        for sensor in model.sensors:
+            sensor.link = mapping.get(sensor.link, sensor.link)
         model.grounded_links = [mapping.get(g, g) for g in model.grounded_links]
 
     @staticmethod
@@ -52,6 +55,13 @@ class NamingPass(ModelPass):
         for c in model.couplings:
             c.leader = DofRef(mapping.get(c.leader.joint, c.leader.joint), c.leader.dof)
             c.follower = DofRef(mapping.get(c.follower.joint, c.follower.joint), c.follower.dof)
+
+    @staticmethod
+    def _rename_sensors(model: RobotModel) -> None:
+        # Globally unique: sensor names become Isaac Lab cfg keys. "visuals"/"collisions" are link children.
+        registry = NameRegistry(reserved={"visuals", "collisions"})
+        for sensor in model.sensors:
+            sensor.name = registry.claim(sensor.metadata.get("export_name", sensor.name), sensor.kind.value)
 
     @staticmethod
     def _rename_materials(model: RobotModel) -> None:

@@ -8,7 +8,7 @@ import adsk.core
 
 from .base import CommandBase
 from .export_command import ExportCommand
-from .properties_command import JointPropertiesCommand, LinkPropertiesCommand
+from .properties_command import JointPropertiesCommand, LinkPropertiesCommand, SensorPropertiesCommand
 
 WORKSPACE_ID = "FusionSolidEnvironment"
 PANEL_ID = "SolidScriptsAddinsPanel"  # UTILITIES > ADD-INS
@@ -16,7 +16,8 @@ PANEL_ID = "SolidScriptsAddinsPanel"  # UTILITIES > ADD-INS
 
 class AddIn:
     def __init__(self) -> None:
-        self.commands: List[CommandBase] = [ExportCommand(), JointPropertiesCommand(), LinkPropertiesCommand()]
+        self.commands: List[CommandBase] = [ExportCommand(), JointPropertiesCommand(), LinkPropertiesCommand(),
+                                           SensorPropertiesCommand()]
 
     def start(self) -> None:
         ui = adsk.core.Application.get().userInterface

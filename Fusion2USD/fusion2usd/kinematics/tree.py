@@ -99,6 +99,7 @@ class KinematicTreePass(ModelPass):
             model.joints = [j for j in model.joints if j.parent in model.links and j.child in model.links]
             alive = {j.name for j in model.joints}
             model.couplings = [c for c in model.couplings if c.leader.joint in alive and c.follower.joint in alive]
+            model.sensors = [s for s in model.sensors if s.link in model.links]
         elif policy is DisconnectedPolicy.FREE:
             ctx.report.warn(f"Parts not connected to the base are exported as free bodies: {names}")
             for name in unreachable:

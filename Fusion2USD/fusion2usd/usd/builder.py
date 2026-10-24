@@ -16,12 +16,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..core.math3d import Quat, Transform, Vec3
 from ..core.naming import NameRegistry
 from ..core.report import ExportReport
-from ..model.robot import Coupling, Dof, DofType, Joint, JointKind, Link, Material, Mesh, RobotModel
+from ..model.robot import (
+    Coupling, Dof, DofType, Joint, JointKind, Link, Material, Mesh, RobotModel, Sensor, SensorKind,
+)
 from ..options import CollisionApproximation, ExportOptions
 from .plan import JOINTS, LOOKS, ROOT_JOINT, ExportPlan
 from .usda import Prim, UsdaStage
 
 DEG = 180.0 / math.pi
+MIMIC_LIMIT_DEG = 3600.0  # finite stand-in for continuous revolute joints in mimic pairs
 INF = math.inf
 _AXES = ("X", "Y", "Z")
 _ALIGN_TOL = math.cos(1e-3)
@@ -30,6 +33,17 @@ _ALIGN_TOL = math.cos(1e-3)
 def _pose_attrs(prim: Prim, index: int, pose: Transform) -> None:
     prim.attr(f"physics:localPos{index}", "point3f", pose.translation.as_tuple())
     prim.attr(f"physics:localRot{index}", "quatf", pose.rotation.normalized().canonical())
+
+
+def _xform_attrs(prim: Prim, t: Transform) -> None:
+    prim.attr("xformOp:translate", "double3", t.translation.as_tuple())
+    prim.attr("xformOp:orient", "quatd", t.rotation.normalized().canonical())
+    prim.attr("xformOp:scale", "double3", (1.0, 1.0, 1.0))
+    prim.attr("xformOpOrder", "uniform token[]", ["xformOp:translate", "xformOp:orient", "xformOp:scale"])
+
+
+# CAD camera frames use the ROS optical convention (+Z forward, +Y down); USD cameras look down -Z with +Y up.
+ROS_TO_USD_CAMERA = Transform(Quat.from_axis_angle(Vec3(1.0, 0.0, 0.0), math.pi))
 
 
 def _limit_pair(lower: Optional[float], upper: Optional[float], scale: float) -> Tuple[float, float]:
@@ -90,6 +104,8 @@ class _StageWriter:
             self._write_joint(joints, joint)
         for coupling in self.plan.mimics:
             self._write_mimic(coupling)
+        for sensor in self.model.sensors:
+            self._write_sensor(sensor)
         self._filter_decomposed_chains()
         for link, targets in self.filtered.items():
             prim = self.stage.get(self.plan.link_path(link))
@@ -105,10 +121,7 @@ class _StageWriter:
     def _write_link(self, link: Link) -> None:
         prim = self.root.define(self.plan.link_names[link.name], "Xform")
         t = link.transform
-        prim.attr("xformOp:translate", "double3", t.translation.as_tuple())
-        prim.attr("xformOp:orient", "quatd", t.rotation.normalized().canonical())
-        prim.attr("xformOp:scale", "double3", (1.0, 1.0, 1.0))
-        prim.attr("xformOpOrder", "uniform token[]", ["xformOp:translate", "xformOp:orient", "xformOp:scale"])
+        _xform_attrs(prim, t)
         prim.apply("PhysicsRigidBodyAPI", "PhysicsMassAPI")
         if link.mass is None:
             self.report.warn(f"link {link.name!r} has no mass properties; PhysX will derive them from density")
@@ -250,6 +263,36 @@ class _StageWriter:
 
         self._filter(joint.parent, joint.child)
 
+    def _write_sensor(self, sensor: Sensor) -> None:
+        link = self.model.links[sensor.link]
+        link_prim = self.stage.get(self.plan.link_path(sensor.link))
+        local = link.transform.inverse() * sensor.transform
+        data: Dict[str, Any] = {"sensor": sensor.kind.value, **sensor.metadata}
+        if sensor.source:
+            data["source"] = sensor.source
+
+        if sensor.kind is SensorKind.CONTACT:
+            link_prim.apply("PhysxContactReportAPI")
+            link_prim.attr("physxContactReport:threshold", "float", float(sensor.params.get("force_threshold") or 0.0))
+            link_prim.custom_data.setdefault("contact_sensors", []).append(sensor.name)
+            return
+        if sensor.kind is SensorKind.CAMERA:
+            p = sensor.params
+            prim = link_prim.define(sensor.name, "Camera")
+            _xform_attrs(prim, local * ROS_TO_USD_CAMERA)
+            prim.attr("projection", "token", "perspective")
+            prim.attr("focalLength", "float", p["focal_length"])
+            prim.attr("horizontalAperture", "float", p["horizontal_aperture"])
+            prim.attr("verticalAperture", "float", p["vertical_aperture"])
+            prim.attr("clippingRange", "float2", tuple(p["clipping_range"]))
+            data.update(width=p["width"], height=p["height"], data_types=list(p["data_types"]))
+        else:  # IMU and named frames are plain transform markers
+            prim = link_prim.define(sensor.name, "Xform")
+            _xform_attrs(prim, local)
+        if "update_period" in sensor.params:
+            data["update_period"] = sensor.params["update_period"]
+        prim.custom_data.update({"fusion2usd": data})
+
     def _filter(self, a: str, b: str) -> None:
         targets = self.filtered.setdefault(b, [])
         path = self.plan.link_path(a)
@@ -280,8 +323,13 @@ class _StageWriter:
         scale = DEG if angular else 1.0
         dof_name = "angular" if angular else "linear"
         prim.attr("physics:axis", "uniform token", "X")
-        if dof.limit is not None and dof.limit.is_bounded:
-            lo, hi = _limit_pair(dof.limit.lower, dof.limit.upper, scale)
+        lo, hi = _limit_pair(dof.limit.lower if dof.limit else None, dof.limit.upper if dof.limit else None, scale)
+        if angular and joint.name in self.plan.mimic_joints and not (math.isfinite(lo) and math.isfinite(hi)):
+            # PhysX disables mimic joints on revolute joints without finite limits (Isaac Sim 6.2).
+            lo, hi = max(lo, -MIMIC_LIMIT_DEG), min(hi, MIMIC_LIMIT_DEG)
+            self.report.warn(f"joint {joint.name!r} is part of a mimic coupling; PhysX needs finite limits, "
+                             f"so it was limited to ±{MIMIC_LIMIT_DEG:g}°")
+        if dof.limit is not None and dof.limit.is_bounded or (math.isfinite(lo) and math.isfinite(hi)):
             prim.attr("physics:lowerLimit", "float", lo)
             prim.attr("physics:upperLimit", "float", hi)
 
@@ -380,8 +428,9 @@ class _StageWriter:
     def _write_mimic(self, coupling: Coupling) -> None:
         follower = self.model.joint(coupling.follower.joint)
         leader = self.model.joint(coupling.leader.joint)
-        inst = "rotX" if follower.kind is JointKind.REVOLUTE else "transX"
-        ref_axis = "rotX" if leader.kind is JointKind.REVOLUTE else "transX"
+        # PhysX (Isaac Sim 6.2) only parses rot* instance/axis tokens; for a prismatic joint the token still
+        # selects its single DOF and the values stay in meters (verified in simulation).
+        inst = ref_axis = "rotX"
         prim = self.stage.get(self.plan.joint_path(follower.name))
         if prim is None:
             return

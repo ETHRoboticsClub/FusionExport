@@ -196,6 +196,30 @@ class Joint:
         return self.child if link == self.parent else self.parent
 
 
+class SensorKind(str, Enum):
+    CAMERA = "camera"    # USD Camera prim; frame uses the ROS optical convention (+Z forward, +X right, +Y down)
+    IMU = "imu"
+    CONTACT = "contact"  # body-level contact reporting on the sensor's link
+    FRAME = "frame"      # named reference frame (tool tip, mount point, ...)
+
+
+@dataclass
+class Sensor:
+    """A sensor or named frame rigidly attached to a link.
+
+    ``transform`` is the sensor frame in world coordinates at the exported pose (like ``Link.transform``).
+    ``params`` holds parsed SI values (see ``kinematics.sensors``); ``metadata`` is exported as customData.
+    """
+
+    name: str
+    kind: SensorKind
+    link: str
+    transform: Transform = field(default_factory=Transform)
+    params: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    source: str = ""
+
+
 @dataclass(frozen=True)
 class DofRef:
     joint: str
@@ -228,6 +252,7 @@ class RobotModel:
     fixed_base: bool = False
     grounded_links: List[str] = field(default_factory=list)  # links welded to the world in CAD
     root_pose: Transform = field(default_factory=Transform)  # world pose of the asset origin (= base link)
+    sensors: List[Sensor] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     # -- construction

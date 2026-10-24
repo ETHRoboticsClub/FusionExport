@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 import adsk.core
 
@@ -18,6 +18,7 @@ from .mass import MassCalculator
 from .metadata import AttributeReader
 from .occurrences import OccurrenceInfo, OccurrenceScanner
 from .probe import JointProbe
+from .sensors import SensorReader
 from .units import items, transform_m
 
 
@@ -139,6 +140,9 @@ class FusionDesignReader:
                                "source_up_axis": self._up_axis()})
         builder = LinkBuilder(self._design, self._options, self._report, by_key, root_bodies)
         link_names = self._build_links(model, builder, grouping, movable)
+        # Before probing, so sensors are read at the same pose as the links.
+        link_of = self._link_resolver(grouping, link_names, by_key, model)
+        model.sensors = SensorReader(root, self._report, link_of).read()
         for material in builder.meshes.appearances.materials:
             model.add_material(material)
 
@@ -155,7 +159,7 @@ class FusionDesignReader:
         model.couplings = MotionLinkReader(root, [i.entity for i in infos], self._report).read(
             fusion_joints, joints_by_name)
         self._report.info(f"Read {len(model.links)} link(s), {len(model.joints)} joint(s), "
-                          f"{len(model.couplings)} motion link(s) from Fusion")
+                          f"{len(model.couplings)} motion link(s), {len(model.sensors)} sensor(s) from Fusion")
         return model
 
     # -- steps
@@ -173,6 +177,21 @@ class FusionDesignReader:
             model.grounded_links = [names[g]]
             model.base_link = names[g]
         return names
+
+    @staticmethod
+    def _link_resolver(grouping: GroupingResult, names: Dict[int, str], by_key: Dict[str, OccurrenceInfo],
+                       model: RobotModel):
+        """Occurrence key -> link name: the nearest ancestor occurrence that is in an exported link,
+        else the root group, else the base link."""
+        def link_of(key: Optional[str]) -> Optional[str]:
+            while key is not None:
+                idx = grouping.group_index(key)
+                if idx in names:
+                    return names[idx]
+                info = by_key.get(key)
+                key = info.record.parent if info is not None else None
+            return names.get(grouping.group_index(None), model.base_link)
+        return link_of
 
     def _known_joints(self, joints: List[FusionJoint], by_key: Dict[str, OccurrenceInfo]) -> List[FusionJoint]:
         out = []

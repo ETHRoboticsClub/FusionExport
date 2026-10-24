@@ -1,0 +1,42 @@
+# Runs tools/isaaclab_smoke_test.py against every export in the synced workdir on a cloud GPU.
+#
+#   sky launch -c fusion2usd-smoke tools/isaaclab_smoke.sky.yaml --workdir <dir with exports/*/*_cfg.py> -i 15 --down
+#
+# The workdir must contain isaaclab_smoke_test.py and exports/<name>/<name>.usda + <name>_cfg.py.
+name: fusion2usd-isaaclab-smoke
+
+resources:
+  any_of:
+    - accelerators: L4:1
+    - accelerators: A10G:1
+  memory: 32+  # Isaac Sim needs ~32 GB RAM
+  use_spot: true
+  disk_size: 200
+
+envs:
+  ISAACLAB_REF: v3.0.0
+  OMNI_KIT_ACCEPT_EULA: "YES"
+  ACCEPT_EULA: "Y"
+
+setup: |
+  set -e
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+  [ -d ~/IsaacLab ] || git clone --depth 1 --branch "$ISAACLAB_REF" https://github.com/isaac-sim/IsaacLab.git ~/IsaacLab
+  cd ~/IsaacLab && uv sync --extra isaacsim
+
+run: |
+  export PATH="$HOME/.local/bin:$PATH"
+  nvidia-smi --query-gpu=name,driver_version --format=csv
+  cd ~/IsaacLab
+  status=0
+  for cfg in ~/sky_workdir/exports/*/*_cfg.py; do
+    echo "=================== $(basename "$cfg")"
+    log=/tmp/$(basename "$cfg" .py).log
+    # headless unless --viz is given (Isaac Lab 3)
+    uv run --extra isaacsim python ~/sky_workdir/isaaclab_smoke_test.py --cfg "$cfg" --enable_cameras > "$log" 2>&1 || status=1
+    grep -E "^\[(PASS|FAIL)\]|CHECKS|Traceback|Error:" "$log"
+    # PhysX reports schema problems (e.g. disabled mimic joints) only as log errors
+    if grep -E "\[Error\] \[omni\.physx" "$log"; then echo "[FAIL] PhysX reported errors"; status=1; fi
+  done
+  exit $status

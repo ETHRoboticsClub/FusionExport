@@ -43,6 +43,12 @@ CRANK_LIMITS = (-1.0, 1.0)
 GEAR_RATIO = 2.0
 BAR_WIDTH, PART_HEIGHT = 1.0, 1.0
 CRANK_ATTRIBUTES = {"effort": "2.5", "velocity": "3.0"}
+# Sensors (joint origins at sketch points, z = 0): a camera on the crank looking along world +X, an IMU on the coupler.
+CAMERA_POINT, IMU_POINT = (0.0, 2.5), (9.0, 6.5)
+SENSORS: Dict[str, Tuple[str, str, XY, Dict[str, str]]] = {  # name -> (kind, part, point, attributes)
+    "camera": ("camera", "crank", CAMERA_POINT, {"sensor": "camera", "width": "640", "height": "480", "fov": "90"}),
+    "imu": ("imu", "coupler", IMU_POINT, {"sensor": "imu"}),
+}
 
 # Expected pivots (cm) of the revolute/ball joints by Fusion joint name.
 PIVOTS: Dict[str, XY] = {"crank": A, "coupler_joint": B, "loop_joint": C, "rocker_joint": D,
@@ -92,8 +98,8 @@ class MechanismBuilder:
         base = self._polygon_part("base", [(-5.0, -8.0), (60.0, -8.0), (60.0, 15.0), (-5.0, 15.0)],
                                   [A, D, SLIDER_POINT, GEAR_CENTER], height=-PART_HEIGHT)
         base.occurrence.isGrounded = True
-        self._polygon_part("crank", bar_corners(A, B, BAR_WIDTH), [A, B])
-        self._polygon_part("coupler", bar_corners(B, C, BAR_WIDTH), [B, C])
+        self._polygon_part("crank", bar_corners(A, B, BAR_WIDTH), [A, B, CAMERA_POINT])
+        self._polygon_part("coupler", bar_corners(B, C, BAR_WIDTH), [B, C, IMU_POINT])
         self._polygon_part("rocker", bar_corners(D, C, BAR_WIDTH), [D, C])
         x0, x1 = SLIDER_POINT[0] - 2.0, SLIDER_POINT[0] + 4.0
         self._polygon_part("slider", [(x0, -1.0), (x1, -1.0), (x1, 1.0), (x0, 1.0)], [SLIDER_POINT, BALL_POINT])
@@ -129,6 +135,11 @@ class MechanismBuilder:
         writer = AttributeWriter()
         writer.write(crank, CRANK_ATTRIBUTES)
         writer.write(loop, {"loop_closure": "true"})  # keep the crank (mimic leader) in the tree
+
+        crank_axis_x = self.parts["crank"].occurrence.component.xConstructionAxis  # crank occurrence is identity
+        for name, (_, part, at, attributes) in SENSORS.items():
+            origin = self._joint_origin(name, part, at, crank_axis_x if name == "camera" else None)
+            writer.write(origin, attributes)
 
     # -- parts
     def _new_component(self, name: str) -> Tuple[Any, Any]:
@@ -180,6 +191,18 @@ class MechanismBuilder:
         inp = joints.createInput(self.parts[one].joint_geometry(at), self.parts[two].joint_geometry(at))
         motion(inp)
         return self._named(name, joints.add(inp))
+
+    def _joint_origin(self, name: str, part: str, at: XY, z_axis: Any = None) -> Any:
+        """A joint origin in the part's component (read back as a root-context proxy)."""
+        origins = self.parts[part].occurrence.component.jointOrigins
+        inp = origins.createInput(adsk.fusion.JointGeometry.createByPoint(self.parts[part].points[at]))
+        if z_axis is not None:
+            inp.zAxisEntity = z_axis
+        origin = origins.add(inp)
+        if origin is None:
+            raise RuntimeError(f"creating joint origin {name!r} failed")
+        origin.name = name
+        return origin
 
     def _named(self, name: str, joint: Any) -> Any:
         if joint is None:
@@ -241,7 +264,7 @@ class ResultChecker:
         checks: List[Check] = []
         for fn in (self.link_count, self.masses, self.loop_joint, self.mimic, self.slider_limits,
                    self.probe_warnings, self.pivots, self.mesh_bounds, self.values_restored,
-                   self.attributes, self.outputs):
+                   self.attributes, self.sensors, self.outputs):
             try:
                 checks.extend(fn())
             except Exception:
@@ -332,6 +355,27 @@ class ResultChecker:
             and props.velocity == float(CRANK_ATTRIBUTES["velocity"])
         return [Check("fusion2usd attributes -> joint properties", ok,
                       f"effort={getattr(props, 'effort', None)}, velocity={getattr(props, 'velocity', None)}")]
+
+    def sensors(self) -> List[Check]:
+        by_name = {s.metadata.get("fusion_name", s.name): s for s in self.raw.sensors}
+        out = [Check("raw model has 2 sensors", len(self.raw.sensors) == len(SENSORS),
+                     f"{[(s.name, s.kind, s.link) for s in self.raw.sensors]}")]
+        for name, (kind, part, xy, _) in SENSORS.items():
+            s = by_name.get(name)
+            link = self.raw.links.get(s.link) if s is not None else None
+            ok_link = link is not None and link.source.split("+")[-1].startswith(part + ":")
+            out.append(Check(f"sensor {name}: kind {kind} on the {part} link",
+                             s is not None and getattr(s.kind, "value", s.kind) == kind and ok_link,
+                             f"kind={getattr(s, 'kind', None)}, link={getattr(s, 'link', None)}"))
+            if s is not None:
+                err = (s.transform.translation - Vec3(xy[0] * CM, xy[1] * CM, 0.0)).norm()
+                out.append(Check(f"sensor {name}: world origin", err < 1e-4, f"error {err:.2e} m"))
+        camera = by_name.get("camera")
+        z = camera.transform.axis(2) if camera is not None else None
+        out.append(Check("camera +Z axis is world +X", z is not None and z.dot(Vec3(1.0, 0.0, 0.0)) > 1 - 1e-6,
+                         f"z={z}"))
+        out.append(Check("USDA contains a Camera prim", re.search(r"\bdef Camera\b", self.usda) is not None))
+        return out
 
     def outputs(self) -> List[Check]:
         return [Check("USDA written", bool(self.usda)),

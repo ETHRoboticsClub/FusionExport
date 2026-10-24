@@ -207,7 +207,8 @@ def build_design(adsk):
                            valueOne=SimpleNamespace(value=1.0), valueTwo=SimpleNamespace(value=2.0))
     root = SimpleNamespace(
         name="Robot", occurrences=Coll([base, arm, wheel]), bRepBodies=Coll(), allJoints=Coll([rev1, rev2]),
-        allAsBuiltJoints=Coll(), allRigidGroups=Coll(), motionLinks=Coll([link]), attributes=Attributes(),
+        allAsBuiltJoints=Coll(), allRigidGroups=Coll(), allJointOrigins=[], motionLinks=Coll([link]),
+        attributes=Attributes(),
         material=None, partNumber="", description="",
     )
     design = SimpleNamespace(rootComponent=root, parentDocument=SimpleNamespace(name="Doc"))
@@ -295,3 +296,64 @@ def test_slider_fallback_axis_is_frame_z(adsk):
     motion = SimpleNamespace(slideDirection=None)
     (spec,) = DOF_SPECS[JT.SliderJointType]
     assert JointBuilder._fallback_axis(spec, motion, frame).is_close(Vec3(0, -1, 0), 1e-9)
+
+
+# ---------------------------------------------------------------- sensors
+
+
+class FakeJointOrigin:
+    def __init__(self, name, context, frame: Transform, attributes=None, geometry_origin=None):
+        self.name = name
+        self.assemblyContext = context
+        self.transform = Matrix(frame)
+        self.attributes = Attributes(attributes)
+        self.nativeObject = None
+        origin = frame.translation if geometry_origin is None else geometry_origin
+        self.geometry = SimpleNamespace(origin=pt(origin, 100.0))
+
+
+CAMERA_FRAME = Transform(Quat.from_axis_angle(Vec3(0, 1, 0), math.pi / 2), Vec3(0.25, 0.0, 0.22))  # Z -> +X
+
+
+def _read_with_origins(adsk, origins):
+    core = adsk["adsk.core"]
+    core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty
+    from fusion2usd.fusion.reader import FusionDesignReader
+
+    design, _ = build_design(adsk)
+    design.rootComponent.allJointOrigins = list(origins)  # a SWIG vector in Fusion: no count/item
+    report = ExportReport()
+    model = FusionDesignReader(design, ExportOptions(source_up_axis="Z", probe_joints=False), report).read()
+    return design, model, report
+
+
+def test_tagged_joint_origin_becomes_sensor(adsk):
+    design, _ = build_design(adsk)
+    arm = design.rootComponent.occurrences[1]
+    camera = FakeJointOrigin("cam", arm, CAMERA_FRAME, {"sensor": "camera", "width": "640",
+                                                         "json": json.dumps({"note": "front"})})
+    untagged = FakeJointOrigin("plain", arm, Transform(), {"other": "x"})
+    root_frame = FakeJointOrigin("tip", None, Transform(translation=Vec3(0, 0, 0.3)), {"sensor": "Frame"},
+                                 geometry_origin=Vec3(0, 0, 0.0))
+    from fusion2usd.model.robot import SensorKind
+
+    _, model, report = _read_with_origins(adsk, [camera, untagged, root_frame])
+    cam, tip = model.sensors
+    assert (cam.name, cam.kind, cam.link) == ("cam", SensorKind.CAMERA, "arm:1")
+    assert cam.transform.is_close(CAMERA_FRAME) and cam.transform.axis(2).is_close(Vec3(1, 0, 0), 1e-9)
+    assert cam.metadata == {"attributes": {"sensor": "camera", "width": "640", "note": "front"}, "fusion_name": "cam"}
+    assert cam.source == "arm:1/cam" and cam.params == {}
+    # Root-level origin: falls back to the grounded/base link; geometry origin mismatch is reported.
+    assert (tip.kind, tip.link, tip.source) == (SensorKind.FRAME, "base:1", "tip")
+    assert any("'tip'" in w and "mm off" in w for w in report.warnings)
+
+
+def test_unknown_sensor_kind_warns_and_duplicate_names_get_suffix(adsk):
+    design, _ = build_design(adsk)
+    arm, wheel = design.rootComponent.occurrences[1:]
+    origins = [FakeJointOrigin("s", arm, Transform(), {"sensor": "lidar"}),
+               FakeJointOrigin("s", arm, Transform(), {"sensor": "imu"}),
+               FakeJointOrigin("s", wheel, Transform(), {"sensor": "contact"})]
+    _, model, report = _read_with_origins(adsk, origins)
+    assert [(s.name, s.link) for s in model.sensors] == [("s", "arm:1"), ("s_2", "wheel:1")]
+    assert any("unknown sensor kind 'lidar'" in w for w in report.warnings)

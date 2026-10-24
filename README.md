@@ -119,6 +119,25 @@ Two scoping rules apply to Fusion attributes:
 - Loop-closing joints, dropped motion links, disconnected parts, missing mass, and probe deviations are
   reported as well.
 
+## Sensors and cameras
+
+1. Add a Joint Origin on the part that carries the sensor (Assemble > Joint Origin). Cameras use the
+   ROS optical convention: +Z looks forward, +X points right, +Y points down.
+2. Run **USD Sensor Properties**, select the joint origin, pick a type and fill in the fields (SI
+   units unless noted, empty = default). Type *None* removes all `fusion2usd` attributes from the origin.
+
+| Type | Fields | USD / Isaac Lab |
+|---|---|---|
+| Camera | width, height (px), fov (horizontal, deg), focal_length, horizontal_aperture, near, far (m), rate (Hz), data_types (e.g. `rgb,depth`) | USD `Camera` prim under the link, Isaac Lab `CameraCfg(spawn=None)` |
+| IMU | rate | `ImuCfg` with the offset to its link |
+| Contact | rate, history_length, track_air_time, force_threshold (N) | `ContactSensorCfg` on the link |
+| Frame | none | `Xform` marker under the link, fixed link in the URDF |
+
+The sensor belongs to the link that contains the joint origin's occurrence. Like other attributes,
+tags are stored on the component, so every instance of a reused component gets the sensor (names are
+made unique with a suffix). The generated Isaac Lab cfg exposes
+`sensors(robot_prim_path="{ENV_REGEX_NS}/Robot")`, which returns the sensor configs for the robot.
+
 ## Post-export actions
 
 Actions turn a finished export into more outputs. Built-ins: `isaaclab_cfg` and `urdf`. To add your
@@ -139,6 +158,22 @@ class MyAction(PostExportAction):
 Enable an action by its registered name, or by `"package.module:ClassName"`, in the dialog's extra
 actions field, in `ExportOptions.post_actions`, or with `--action` on the CLI. A failing action shows
 up as a warning and never loses the USD.
+
+## Verifying in Isaac Lab
+
+`tools/isaaclab_smoke_test.py` loads an export in Isaac Lab 3 (PhysX backend) and checks:
+- the spawn and reset pose;
+- per-environment placement of cloned robots;
+- that the simulation stays stable and loop closures stay closed;
+- that mimic joints follow their leaders;
+- that sensors work (cameras render, and their optical axis matches Isaac Lab's ROS convention).
+
+`tools/isaaclab_smoke.sky.yaml` runs it on a cloud GPU with SkyPilot:
+
+```bash
+# workdir contains isaaclab_smoke_test.py and exports/<name>/<name>.usda + <name>_cfg.py
+sky launch -c fusion2usd-smoke tools/isaaclab_smoke.sky.yaml --workdir <dir> -i 15 --down
+```
 
 ## CLI (offline, no Fusion)
 
@@ -204,10 +239,15 @@ script:
   loop-closing joint is dropped (with a warning).
 - URDF cannot represent closed loops, D6 joints or free bodies; those are omitted from the URDF.
 
-- Motion links are written as `PhysxMimicJointAPI` with `offset` in degrees for angular followers and
-  `gearing` in deg/m or m/deg for mixed couplings, following the PhysX schema docs. This has not yet
-  been checked in simulation. Recent Isaac Sim importers author `NewtonMimicAPI` instead; support for
-  that is not implemented.
+- Motion links are written as `PhysxMimicJointAPI`. Two constraints were verified in Isaac Sim 6.2 /
+  Isaac Lab 3.0, where breaking either one silently disables the coupling:
+  - The instance and reference-axis tokens are always `rotX`, also for prismatic joints. A `transX`
+    instance is ignored.
+  - Every revolute joint in a coupling needs finite limits. Continuous joints get ±3600° and a warning.
+
+  Units are USD units: `offset` is in degrees (or meters), and `gearing` is in m/deg for
+  rotary-to-linear couplings. Recent Isaac Sim importers author `NewtonMimicAPI` instead; the Newton
+  backend is not supported yet.
 
 ## License
 

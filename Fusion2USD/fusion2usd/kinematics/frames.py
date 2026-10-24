@@ -27,6 +27,8 @@ class WorldTransformPass(ModelPass):
                 dof.axis = t.apply_vector(dof.axis)
             if joint.frame_hint is not None:
                 joint.frame_hint = t * joint.frame_hint
+        for sensor in model.sensors:
+            sensor.transform = t * sensor.transform
         return model
 
 

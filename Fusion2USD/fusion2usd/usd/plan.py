@@ -43,6 +43,7 @@ class ExportPlan:
 
         self.mimics: List[Coupling] = self._valid_mimics() if options.export_mimic_joints else []
         self.followers: Set[str] = {c.follower.joint for c in self.mimics}
+        self.mimic_joints: Set[str] = self.followers | {c.leader.joint for c in self.mimics}
 
     # -- paths
     def link_path(self, link: str) -> str:
