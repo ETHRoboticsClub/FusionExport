@@ -106,6 +106,12 @@ class CommandBase:
                 old.deleteMe()
             self._control = panel.controls.addCommand(self._definition)
 
+    def promote(self) -> None:
+        """Show the button directly on the panel rather than only in its overflow menu."""
+        if self._control is not None:
+            self._control.isPromoted = True
+            self._control.isPromotedByDefault = True
+
     def unregister(self) -> None:
         if self._control is not None and self._control.isValid:
             self._control.deleteMe()

@@ -6,10 +6,15 @@ fingers), joint metadata (torque, velocity, gains, ...), and optional URDF outpu
 
 ## Install
 
-1. Copy or symlink the `Fusion2USD/` folder into Fusion's add-in directory:
-   - macOS: `~/Library/Application Support/Autodesk/Autodesk Fusion 360/API/AddIns/`
-   - Windows: `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`
-2. In Fusion: **Utilities → Add-Ins → Scripts and Add-Ins → Add-Ins → Fusion2USD → Run**.
+1. In Fusion, open **Utilities → Add-Ins → Scripts and Add-Ins**, click **+** next to *My Add-Ins*,
+   and select this repo's `Fusion2USD/` folder. For the self-test, click **+** next to *My Scripts* and
+   select `Fusion2USD/selftest/`.
+
+   Don't symlink the folder into Fusion's `API/AddIns` directory: Fusion then registers it twice,
+   once by the link and once by its real path. Copying the folder there works but doesn't track the
+   repo.
+2. Select **Fusion2USD → Run**. The add-in loads on startup from then on, and its commands appear in
+   the **FUSION2USD** panel on the **UTILITIES** tab of the Design workspace.
 
 No third-party packages are needed inside Fusion. The add-in writes `.usda` text directly. For binary
 `.usd`/`.usdc` output, `usd-core` must be importable; if it isn't, the add-in falls back to `.usda` and
@@ -218,9 +223,8 @@ uv venv -p 3.12 .venv && uv pip install --python .venv/bin/python usd-core pytes
 The unit tests cannot reach Fusion. To check the exporter against the real API, run the self-test
 script:
 
-1. Copy or symlink `Fusion2USD/selftest` into Fusion's `API/Scripts` folder as `SelfTest` (or add
-   it with the `+` next to *My Scripts*). Then open **Utilities > Scripts and Add-Ins > Scripts** and
-   run **SelfTest**.
+1. Register `Fusion2USD/selftest/` with the **+** next to *My Scripts* (see Install), then run
+   **SelfTest** from **Utilities > Scripts and Add-Ins > Scripts**.
 2. It builds a test mechanism in a **new, unsaved design**: a grounded base, a four-bar loop, a
    slider, a gear linked 2:1 to the crank, a ball joint, a camera and an IMU. It then exports the
    design and checks links, the loop cut, the mimic gearing, slider limits, the probed axes and

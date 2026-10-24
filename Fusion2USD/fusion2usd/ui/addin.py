@@ -1,8 +1,8 @@
-"""Registers the Fusion2USD commands in the Design workspace."""
+"""Registers the Fusion2USD commands in their own panel on the Design workspace's UTILITIES tab."""
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, List, Optional
 
 import adsk.core
 
@@ -11,21 +11,32 @@ from .export_command import ExportCommand
 from .properties_command import JointPropertiesCommand, LinkPropertiesCommand, SensorPropertiesCommand
 
 WORKSPACE_ID = "FusionSolidEnvironment"
-PANEL_ID = "SolidScriptsAddinsPanel"  # UTILITIES > ADD-INS
+PANEL_ID = "Fusion2USDPanel"
+PANEL_NAME = "FUSION2USD"
 
 
 class AddIn:
     def __init__(self) -> None:
         self.commands: List[CommandBase] = [ExportCommand(), JointPropertiesCommand(), LinkPropertiesCommand(),
                                            SensorPropertiesCommand()]
+        self._panel: Optional[Any] = None
 
     def start(self) -> None:
         ui = adsk.core.Application.get().userInterface
         workspace = ui.workspaces.itemById(WORKSPACE_ID)
-        panel = workspace.toolbarPanels.itemById(PANEL_ID) if workspace is not None else None
+        if workspace is None:
+            ui.messageBox(f"Fusion2USD: workspace {WORKSPACE_ID!r} not found; commands are not on the toolbar.")
+        else:
+            panels = workspace.toolbarPanels
+            # Without a tab, Fusion places new panels on the Tools (UTILITIES) tab.
+            self._panel = panels.itemById(PANEL_ID) or panels.add(PANEL_ID, PANEL_NAME)
         for cmd in self.commands:
-            cmd.register(panel)
+            cmd.register(self._panel)
+            cmd.promote()
 
     def stop(self) -> None:
         for cmd in self.commands:
             cmd.unregister()
+        if self._panel is not None and self._panel.isValid:
+            self._panel.deleteMe()
+        self._panel = None
