@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fusion2usd"
+version = "0.1.0"
+description = "Export Autodesk Fusion assemblies (incl. closed loops and motion links) to USD for Isaac Lab"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.optional-dependencies]
+binary = ["usd-core>=24.0"]   # only needed for .usdc output outside Fusion
+dev = ["pytest>=7", "usd-core>=24.0"]
+
+[project.scripts]
+fusion2usd = "fusion2usd.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["Fusion2USD"]
+include = ["fusion2usd*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["Fusion2USD"]

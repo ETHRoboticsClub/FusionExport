@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "script",
+  "id": "f088918e-718f-413a-9cc4-4160742f2005",
+  "author": "",
+  "description": {
+    "": "Fusion2USD live self-test: builds a test mechanism in a new design, exports it and checks the result"
+  },
+  "version": "0.1.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

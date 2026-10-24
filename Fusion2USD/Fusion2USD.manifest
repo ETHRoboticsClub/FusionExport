@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "decb3407-24bb-4a65-add8-7e695cb524ab",
+  "author": "",
+  "description": {
+    "": "Export Fusion assemblies to USD for Isaac Lab / Isaac Sim"
+  },
+  "version": "0.1.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
