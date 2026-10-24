@@ -34,7 +34,7 @@ import torch  # noqa: E402
 from pxr import Gf, Usd, UsdGeom, UsdPhysics  # noqa: E402
 
 import isaaclab.sim as sim_utils  # noqa: E402
-from isaaclab.assets import ArticulationCfg  # noqa: E402
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # noqa: E402
 from isaaclab.scene import InteractiveScene, InteractiveSceneCfg  # noqa: E402
 from isaaclab.utils import configclass  # noqa: E402
 
@@ -66,6 +66,7 @@ def T(x):
 def quat_rotate(q: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     """Rotate v by (x, y, z, w) quaternion q (Isaac Lab 3 order)."""
     xyz, w = q[..., :3], q[..., 3:]
+    v = v.expand_as(xyz)
     t = 2.0 * torch.cross(xyz, v, dim=-1)
     return v + w * t + torch.cross(xyz, t, dim=-1)
 
@@ -80,6 +81,10 @@ def main() -> int:
     @configclass
     class SceneCfg(InteractiveSceneCfg):
         robot = robot_cfg.replace(prim_path="{ENV_REGEX_NS}/Robot")
+        light = AssetBaseCfg(prim_path="/World/light", spawn=sim_utils.DomeLightCfg(intensity=2000.0))
+        # gives cameras a horizon to look at (an empty world renders a uniform image)
+        ground = AssetBaseCfg(prim_path="/World/ground", spawn=sim_utils.GroundPlaneCfg(),
+                              init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, -1.0)))
 
     scene_cfg = SceneCfg(num_envs=args.num_envs, env_spacing=3.0)
     sensor_cfgs = sensors_factory() if sensors_factory else {}
@@ -92,7 +97,8 @@ def main() -> int:
     if args.mimic_offset_probe:
         for prim in sim.stage.Traverse():
             for schema in prim.GetAppliedSchemas():
-                if schema.startswith("PhysxMimicJointAPI:rot"):
+                # angular followers only (prismatic followers also use rot* tokens; an offset there is meters)
+                if schema.startswith("PhysxMimicJointAPI:") and prim.IsA(UsdPhysics.RevoluteJoint):
                     prim.GetAttribute(f"physxMimicJoint:{schema.split(':', 1)[1]}:offset").Set(args.mimic_offset_probe)
     sim.reset()
     robot = scene["robot"]
@@ -209,7 +215,7 @@ def main() -> int:
             rgb = T(sensor.data.output["rgb"]).float()
             shape_ok = tuple(rgb.shape[:3]) == (args.num_envs, cfg.height, cfg.width)
             checks.check(shape_ok and rgb.std().item() > 0.0, f"camera {name} renders",
-                         f"shape {tuple(rgb.shape)}, std {rgb.std().item():.2f}")
+                         f"shape {tuple(rgb.shape)}, mean {rgb.mean().item():.1f}, std {rgb.std().item():.2f}")
             # Isaac Lab's ROS-convention forward (+Z) must match the exported USD camera's -Z axis
             prim = stage.GetPrimAtPath(f"{env0_prefix}/{cfg.prim_path.split('/Robot/', 1)[1]}")
             m = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
@@ -229,5 +235,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     code = main()
-    app.close()
+    app.close(exit_code=code)  # Isaac Lab 3: close() exits the process with this status
     sys.exit(code)
