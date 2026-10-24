@@ -218,12 +218,13 @@ uv venv -p 3.12 .venv && uv pip install --python .venv/bin/python usd-core pytes
 The unit tests cannot reach Fusion. To check the exporter against the real API, run the self-test
 script:
 
-1. In Fusion, open **Utilities > Scripts and Add-Ins**, add `Fusion2USD/selftest` (the `+` next to
-   *My Scripts*) and run **SelfTest**.
+1. In Fusion, open **Utilities > Scripts and Add-Ins > Scripts** and run **SelfTest**. Fusion finds
+   it inside the installed `Fusion2USD` add-in folder, so it needs no separate install.
 2. It builds a test mechanism in a **new, unsaved design**: a grounded base, a four-bar loop, a
-   slider, a gear linked 2:1 to the crank, and a ball joint. It then exports the design and checks
-   links, the loop cut, the mimic gearing, slider limits, the probed axes and origins, mesh frames,
-   joint attributes, and that all joint values are restored. Your open designs are not touched.
+   slider, a gear linked 2:1 to the crank, a ball joint, a camera and an IMU. It then exports the
+   design and checks links, the loop cut, the mimic gearing, slider limits, the probed axes and
+   origins, mesh frames, joint attributes, the sensors, and that all joint values are restored. Your
+   open designs are not touched.
 3. The pass/fail report appears in a message box and is saved as `selftest_report.txt` next to the
    exported files in a temporary `fusion2usd_selftest_*` directory. The test design stays open so
    you can inspect it.
