@@ -396,3 +396,16 @@ def test_grounded_group_with_root_bodies_is_named_after_its_occurrence(adsk):
     assert base.source == "base:1" and base.transform.is_close(Transform())  # root frame anchors it
     assert "(Unsaved)" not in model.links
     assert sorted(m.name for m in base.visuals) == ["floor", "plate"]  # root bodies joined the base link
+
+
+def test_rotation_values_wrap_into_the_limits(adsk):
+    """Fusion reports -0.01 rad as 6.27; left unwrapped, a rezeroed limit lands a full turn away."""
+    from fusion2usd.fusion.joints import wrap_angle
+    from fusion2usd.model.robot import Limit
+
+    tau = 2 * math.pi
+    assert wrap_angle(tau - 0.01, Limit(-0.35, 0.35)) == pytest.approx(-0.01)
+    assert wrap_angle(tau - 0.01, None) == pytest.approx(-0.01)
+    assert wrap_angle(math.radians(200), Limit(math.radians(-60), math.radians(210))) == pytest.approx(math.radians(200))
+    assert wrap_angle(math.radians(200), None) == pytest.approx(math.radians(-160))
+    assert wrap_angle(0.1, Limit(-1.0, 1.0)) == pytest.approx(0.1)

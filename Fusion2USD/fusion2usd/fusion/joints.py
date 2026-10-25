@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -106,6 +107,17 @@ def to_si(spec: DofSpec, value: float) -> float:
 
 def from_si(spec: DofSpec, value: float) -> float:
     return value / CM if spec.type is DofType.TRANSLATION else value
+
+
+def wrap_angle(value: float, limit: Optional[Limit]) -> float:
+    """Fusion reports angles in [0, 2π): -0.01 comes back as 6.27. Pick the equivalent angle closest to
+    zero that lies within the limits (or within (-π, π] when none fits)."""
+    base = math.remainder(value, 2.0 * math.pi)
+    candidates = [base + k * 2.0 * math.pi for k in (-2, -1, 0, 1, 2)]
+    lo = -math.inf if limit is None or limit.lower is None else limit.lower - 1e-9
+    hi = math.inf if limit is None or limit.upper is None else limit.upper + 1e-9
+    inside = [c for c in candidates if lo <= c <= hi]
+    return min(inside, key=abs) if inside else base
 
 
 def occurrence_key(occurrence: Any) -> Optional[str]:
@@ -258,8 +270,11 @@ class JointBuilder:
         axis = optional_vec(getattr(motion, spec.axis_attr)) if spec.axis_attr else None
         if axis is None:
             axis = self._fallback_axis(spec, motion, frame)
-        return Dof(spec.type, axis.normalized(), to_si(spec, getattr(motion, spec.value_attr)),
-                   self._limit(spec, getattr(motion, spec.limits_attr)), spec.label)
+        limit = self._limit(spec, getattr(motion, spec.limits_attr))
+        value = to_si(spec, getattr(motion, spec.value_attr))
+        if spec.type is DofType.ROTATION:
+            value = wrap_angle(value, limit)
+        return Dof(spec.type, axis.normalized(), value, limit, spec.label)
 
     @staticmethod
     def _fallback_axis(spec: DofSpec, motion: Any, frame: Transform) -> Vec3:
