@@ -31,8 +31,16 @@ class PropertiesCommand(CommandBase):
 
     def on_create(self, command: Any, inputs: Any) -> None:
         sel = inputs.addSelectionInput("entity", "Entity", self.prompt)
+        # Filter names vary across Fusion builds; skip unknown ones instead of failing the dialog.
+        added = 0
         for f in self.selection_filters:
-            sel.addSelectionFilter(f)
+            try:
+                sel.addSelectionFilter(f)
+                added += 1
+            except RuntimeError:
+                pass
+        if self.selection_filters and not added:
+            raise RuntimeError(f"no supported selection filter among {self.selection_filters}")
         sel.setSelectionLimits(1, 1)
         for name, label in self._string_fields():
             inputs.addStringValueInput(name, label, "")

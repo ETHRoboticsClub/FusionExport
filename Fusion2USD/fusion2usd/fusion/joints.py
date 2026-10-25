@@ -87,8 +87,10 @@ DOF_SPECS: Dict[Any, Tuple[DofSpec, ...]] = {
 TYPE_NAMES = {
     JT.RigidJointType: "rigid", JT.RevoluteJointType: "revolute", JT.SliderJointType: "slider",
     JT.CylindricalJointType: "cylindrical", JT.PinSlotJointType: "pin_slot",
-    JT.PlanarJointType: "planar", JT.BallJointType: "ball", JT.InferredJointType: "inferred",
+    JT.PlanarJointType: "planar", JT.BallJointType: "ball",
 }
+if hasattr(JT, "InferredJointType"):  # missing in some Fusion builds
+    TYPE_NAMES[JT.InferredJointType] = "inferred"
 
 # JointMotionTypes value -> DOF index within its joint (for motion links).
 MOTION_DOF_INDEX: Dict[Any, int] = {
