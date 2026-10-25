@@ -14,7 +14,7 @@ from .base import CommandBase
 from .inputs import add_dropdown, bool_value, dropdown_value, string_value
 from .settings import OptionsStore
 
-ENGINE = [("PhysX (Isaac Sim / Isaac Lab)", PhysicsEngine.PHYSX.value), ("Newton", PhysicsEngine.NEWTON.value)]
+ENGINE = [("Newton", PhysicsEngine.NEWTON.value), ("PhysX (Isaac Sim / Isaac Lab)", PhysicsEngine.PHYSX.value)]
 UP_AXIS = [("Auto (modeling preference)", "auto"), ("Y up", "Y"), ("Z up", "Z")]
 ZERO_POSE = [("Fusion joint zero", ZeroPose.FUSION.value), ("Current pose", ZeroPose.CURRENT.value)]
 FIXED_BASE = [("Auto (grounded in Fusion)", "auto"), ("Fixed", "fixed"), ("Floating", "floating")]

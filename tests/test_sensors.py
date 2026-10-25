@@ -11,7 +11,7 @@ from fusion2usd.isaaclab.cfg_writer import IsaacLabCfgWriter
 from fusion2usd.kinematics import PassContext, default_pipeline
 from fusion2usd.kinematics.sensors import camera_horizontal_fov
 from fusion2usd.model.robot import Sensor, SensorKind
-from fusion2usd.options import ExportOptions
+from fusion2usd.options import ExportOptions, PhysicsEngine
 from fusion2usd.serialization import ModelSerializer
 from fusion2usd.urdf.writer import UrdfWriter
 from fusion2usd.usd.writer import UsdWriter
@@ -42,7 +42,7 @@ def with_sensors(y_up: bool = False):
 
 
 def process(model):
-    opts = ExportOptions()
+    opts = ExportOptions(physics_engine=PhysicsEngine.PHYSX)
     report = ExportReport()
     return default_pipeline().run(model, PassContext(opts, report)), opts, report
 

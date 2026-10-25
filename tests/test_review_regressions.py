@@ -15,7 +15,7 @@ from fusion2usd.usd.builder import UsdRobotBuilder
 
 
 def process(model, **opts):
-    options = ExportOptions(**opts)
+    options = ExportOptions(**{"physics_engine": PhysicsEngine.PHYSX, **opts})
     report = ExportReport()
     return default_pipeline().run(model, PassContext(options, report)), options, report
 

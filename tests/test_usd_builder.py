@@ -17,11 +17,12 @@ pytest.importorskip("pxr")
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade  # noqa: E402
 
 TOL = 1e-5
+PHYSX = ExportOptions(physics_engine=PhysicsEngine.PHYSX)  # build() default; the options default is Newton
 
 
 def build(model, options=None):
     report = ExportReport()
-    text = UsdRobotBuilder(options or ExportOptions(), report).build(model).to_string()
+    text = UsdRobotBuilder(options or PHYSX, report).build(model).to_string()
     layer = Sdf.Layer.CreateAnonymous(".usda")
     assert layer.ImportFromString(text), text
     stage = Usd.Stage.Open(layer)

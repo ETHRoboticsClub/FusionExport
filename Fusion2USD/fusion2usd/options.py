@@ -55,7 +55,7 @@ class DriveDefaults:
 class ExportOptions:
     robot_name: Optional[str] = None          # default: Fusion document name
     output_path: str = ""                     # .usda / .usd / .usdc
-    physics_engine: PhysicsEngine = PhysicsEngine.PHYSX
+    physics_engine: PhysicsEngine = PhysicsEngine.NEWTON
     zero_pose: ZeroPose = ZeroPose.FUSION
     fixed_base: Optional[bool] = None         # None: fixed iff something is grounded in Fusion
     base_link: Optional[str] = None           # Fusion occurrence/link name; None: auto
