@@ -263,6 +263,28 @@ def test_reader_on_fake_design(adsk):
     assert c.offset == pytest.approx(0.4 - (-2.0) * 0.1)
 
 
+def test_probe_keeps_api_axis_when_other_dofs_move_too(adsk):
+    """In a closed loop Fusion re-solves the other DOFs, so the measured motion is not this DOF's alone."""
+    from fusion2usd.fusion.joints import FusionJoint
+    from fusion2usd.fusion.probe import JointProbe
+    from fusion2usd.model.robot import Dof, DofType, Joint
+
+    jt = adsk["adsk.fusion"].JointTypes
+    motion = RevoluteMotion(jt.RevoluteJointType, Vec3(0, 0, 1))
+    y = Vec3(0, 1, 0)
+    arm = Occurrence("arm:1", lambda: rotation_about(y, AXIS1_POINT, 10 * motion.rotationValue))
+    base = Occurrence("base:1", lambda: BASE_POSE)
+    entity = FakeJoint("rev", arm, base, motion, Transform(translation=AXIS1_POINT))
+    fj = FusionJoint(entity, "rev", "rev", "", False, jt.RevoluteJointType, arm, base, None)
+    joint = Joint("rev", "base:1", "arm:1", AXIS1_POINT, [Dof(DofType.ROTATION, Vec3(0, 0, 1))])
+    report = ExportReport()
+    JointProbe(report).run([(fj, joint)])
+
+    assert joint.dofs[0].axis.is_close(Vec3(0, 0, 1))
+    assert any("for a commanded" in w and "using API axis" in w for w in report.warnings)
+    assert motion.rotationValue == 0.0
+
+
 def test_internal_joint_dropped_and_hidden_body_skipped(adsk):
     core = adsk["adsk.core"]
     core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty

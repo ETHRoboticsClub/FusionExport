@@ -83,9 +83,11 @@ class JointProbe:
         d = relative_motion(a0, b0, a1, b1)
         delta_si = to_si(spec, delta)
         m = measure_dof(spec.type, delta_si, d, near=joint.origin)
+        # Wrong magnitude: other DOFs moved too (e.g. Fusion re-solving a closed loop), so the axis is unreliable.
         if abs(m.magnitude - abs(delta_si)) > 0.2 * abs(delta_si):
             self._report.warn(f"joint {joint.name!r} DOF {spec.label!r}: moved {m.magnitude:.4g} for a "
-                              f"commanded {abs(delta_si):.4g}")
+                              f"commanded {abs(delta_si):.4g}; using API axis")
+            return
         dof = joint.dofs[index]
         if axis_deviation(m.axis, dof.axis) > self._max_dev:
             self._report.warn(f"joint {joint.name!r} DOF {spec.label!r}: measured axis deviates "
