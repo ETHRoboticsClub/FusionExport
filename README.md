@@ -45,7 +45,8 @@ robot_cfg = MY_ROBOT_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 | Revolute / Slider | `PhysicsRevoluteJoint` / `PhysicsPrismaticJoint` with limits, `DriveAPI`, `JointStateAPI` |
 | Cylindrical, Pin-slot, Planar, Ball | chain of single-DOF joints through tiny helper links (Isaac Lab handles 1-DOF joints best) |
 | Closed loops | spanning tree; one joint per loop is `excludeFromArticulation = true` (multi-DOF loop joints become D6 joints) |
-| Motion links | `PhysxMimicJointAPI` on the follower (`q_f + gearing·q_l + offset = 0`) |
+| Ball, with *Passive ball joints as spherical joints* | `PhysicsSphericalJoint`, no helper links, also as a loop closure (only unlimited, undriven balls outside motion links) |
+| Motion links | `PhysxMimicJointAPI` (`q_f + gearing·q_l + offset = 0`) and `NewtonMimicAPI` (`q_f = coef1·q_l + coef0`) on the follower |
 | Bodies' appearances | `UsdPreviewSurface` materials under the default prim |
 | Collision | per-body meshes (coarser tessellation), `convexDecomposition` by default |
 
@@ -241,6 +242,7 @@ script:
   explicitly in the export dialog.
 - Joint decomposition approximates Fusion's multi-DOF semantics. The decomposed chain is exact at the
   exported pose; large ball-joint motions may differ from Fusion's own parameterization.
+  The spherical-joint option avoids this for passive balls; URDF has no ball joint, so it drops their subtree.
 - PhysX mimic joints need both joints inside the articulation, so a motion link that involves a
   loop-closing joint is dropped (with a warning).
 - URDF cannot represent closed loops, D6 joints or free bodies; those are omitted from the URDF.
@@ -252,8 +254,10 @@ script:
   - Every revolute joint in a coupling needs finite limits. Continuous joints get ±3600° and a warning.
 
   Units are USD units: `offset` is in degrees (or meters), and `gearing` is in m/deg for
-  rotary-to-linear couplings. Recent Isaac Sim importers author `NewtonMimicAPI` instead; the Newton
-  backend is not supported yet.
+  rotary-to-linear couplings.
+- Motion links are also written as `NewtonMimicAPI`, which Newton prefers over the PhysX schema.
+  `coef0` is in degrees (or meters), but `coef1` is in joint coordinates (m/rad for rotary-to-linear):
+  NVIDIA's schema doc specifies USD units, while Newton's importer applies it unconverted.
 
 ## License
 

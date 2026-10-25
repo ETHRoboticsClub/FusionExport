@@ -222,10 +222,11 @@ class _StageWriter:
             self.report.warn(f"joint {joint.name!r} references a missing link, skipped")
             return
         kind = joint.kind
-        if kind is JointKind.MULTI and not joint.exclude_from_articulation:
+        spherical = bool(joint.metadata.get("spherical"))
+        if kind is JointKind.MULTI and not spherical and not joint.exclude_from_articulation:
             self.report.warn(f"joint {joint.name!r} has several DOFs but is part of the articulation; "
                              "writing it as an excluded D6 joint")
-        type_name = {
+        type_name = "PhysicsSphericalJoint" if spherical else {
             JointKind.FIXED: "PhysicsFixedJoint",
             JointKind.REVOLUTE: "PhysicsRevoluteJoint",
             JointKind.PRISMATIC: "PhysicsPrismaticJoint",
@@ -235,7 +236,11 @@ class _StageWriter:
         prim.rel("physics:body0", [self.plan.link_path(joint.parent)])
         prim.rel("physics:body1", [self.plan.link_path(joint.child)])
 
-        if kind is JointKind.MULTI:
+        if spherical:
+            # Unlimited, so the frames only need to coincide at the export pose (like free D6 rotations).
+            frame, motion = self._joint_frame(joint), Transform.identity()
+            prim.attr("physics:axis", "uniform token", "X")
+        elif kind is JointKind.MULTI:
             frame, motion = self._write_d6(prim, joint)
         else:
             frame = self._joint_frame(joint)
@@ -244,7 +249,7 @@ class _StageWriter:
         _pose_attrs(prim, 0, parent.transform.inverse() * frame)
         _pose_attrs(prim, 1, child.transform.inverse() * frame * motion)
 
-        excluded = joint.exclude_from_articulation or kind is JointKind.MULTI
+        excluded = joint.exclude_from_articulation or (kind is JointKind.MULTI and not spherical)
         prim.attr("physics:jointEnabled", "bool", bool(joint.enabled))
         prim.attr("physics:collisionEnabled", "bool", False)
         prim.attr("physics:excludeFromArticulation", "bool", excluded)
@@ -325,9 +330,9 @@ class _StageWriter:
         prim.attr("physics:axis", "uniform token", "X")
         lo, hi = _limit_pair(dof.limit.lower if dof.limit else None, dof.limit.upper if dof.limit else None, scale)
         if angular and joint.name in self.plan.mimic_joints and not (math.isfinite(lo) and math.isfinite(hi)):
-            # PhysX disables mimic joints on revolute joints without finite limits (Isaac Sim 6.2).
+            # PhysX (Isaac Sim 6.2) and NewtonMimicAPI both need finite limits on revolute mimic joints.
             lo, hi = max(lo, -MIMIC_LIMIT_DEG), min(hi, MIMIC_LIMIT_DEG)
-            self.report.warn(f"joint {joint.name!r} is part of a mimic coupling; PhysX needs finite limits, "
+            self.report.warn(f"joint {joint.name!r} is part of a mimic coupling; PhysX and Newton need finite limits, "
                              f"so it was limited to ±{MIMIC_LIMIT_DEG:g}°")
         if dof.limit is not None and dof.limit.is_bounded or (math.isfinite(lo) and math.isfinite(hi)):
             prim.attr("physics:lowerLimit", "float", lo)
@@ -443,3 +448,10 @@ class _StageWriter:
         # q_f = r q_l + c  in SI  ->  q_f' + gearing q_l' + offset = 0  in USD units (deg / m)
         prim.attr(f"{ns}:gearing", "float", -coupling.ratio * f_scale / l_scale)
         prim.attr(f"{ns}:offset", "float", -coupling.offset * f_scale)
+
+        # Newton: q_f = coef1 q_l + coef0, coef0 in follower USD units. NVIDIA's schema doc puts coef1 in USD
+        # units too, but Newton's importer applies it unconverted in joint coordinates (rad / m), so use SI.
+        prim.apply("NewtonMimicAPI")
+        prim.rel("newton:mimicJoint", [self.plan.joint_path(leader.name)])
+        prim.attr("newton:mimicCoef0", "float", coupling.offset * f_scale)
+        prim.attr("newton:mimicCoef1", "float", coupling.ratio)

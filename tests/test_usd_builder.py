@@ -206,6 +206,11 @@ def test_prismatic_mimic():
     # prismatic follower, revolute leader: PhysX wants m/deg
     assert rack.GetAttribute("physxMimicJoint:rotX:gearing").Get() == pytest.approx(-0.05 / DEG)
     assert rack.GetAttribute("physxMimicJoint:rotX:offset").Get() == pytest.approx(-0.001)
+    # Newton: q_f = coef1 q_l + coef0, coef1 in joint coordinates (m/rad), coef0 in m
+    assert "NewtonMimicAPI" in rack.GetPrimTypeInfo().GetAppliedAPISchemas()
+    assert rack.GetRelationship("newton:mimicJoint").GetTargets() == [Sdf.Path("/rack_pinion/joints/wheel_joint")]
+    assert rack.GetAttribute("newton:mimicCoef1").Get() == pytest.approx(0.05)
+    assert rack.GetAttribute("newton:mimicCoef0").Get() == pytest.approx(0.001)
     # the continuous wheel leads a mimic: PhysX needs finite limits on it
     wheel = UsdPhysics.RevoluteJoint(stage.GetPrimAtPath("/rack_pinion/joints/wheel_joint"))
     assert (wheel.GetLowerLimitAttr().Get(), wheel.GetUpperLimitAttr().Get()) == (-3600.0, 3600.0)
@@ -221,6 +226,7 @@ def test_prismatic_mimic():
     stage, _ = build(mimic_model(), ExportOptions(export_mimic_joints=False))
     rack = stage.GetPrimAtPath("/rack_pinion/joints/rack_joint")
     assert not rack.GetRelationship("physxMimicJoint:transX:referenceJoint")
+    assert not rack.GetRelationship("newton:mimicJoint")
     assert rack.HasAPI(UsdPhysics.DriveAPI)
 
 
@@ -290,3 +296,46 @@ def test_reserved_names_do_not_collide():
     assert stage.GetPrimAtPath("/four_bar/joints_2").HasAPI(UsdPhysics.RigidBodyAPI)
     assert stage.GetPrimAtPath("/four_bar/joints").GetTypeName() == "Scope"
     assert any("renamed" in w for w in report.warnings)
+
+
+def _passive_ball(exclude: bool):
+    from fusion2usd.kinematics import JointDecompositionPass, PassContext
+    model = ball_model()
+    ball = model.joint("ball_joint")
+    ball.exclude_from_articulation = exclude
+    ball.dofs[2].limit = None
+    opts = ExportOptions(spherical_ball_joints=True)
+    report = ExportReport()
+    model = JointDecompositionPass().run(model, PassContext(opts, report))
+    return model, opts, report
+
+
+@pytest.mark.parametrize("exclude", [False, True])
+def test_passive_ball_as_spherical_joint(exclude):
+    model, opts, _ = _passive_ball(exclude)
+    assert not any(link.is_virtual for link in model.links.values())  # no helper bodies
+    stage, _ = build(model, opts)
+    ball, rel = _rel(stage, "/ball_robot/joints/ball_joint")
+    assert ball.IsA(UsdPhysics.SphericalJoint)
+    assert UsdPhysics.Joint(ball).GetExcludeFromArticulationAttr().Get() is exclude
+    assert not ball.HasAPI(UsdPhysics.DriveAPI)
+    assert not UsdPhysics.SphericalJoint(ball).GetConeAngle0LimitAttr().HasAuthoredValue()
+    # both joint frames coincide at the export pose
+    assert list(rel.ExtractTranslation()) == pytest.approx([0, 0, 0], abs=TOL)
+    assert rel.ExtractRotation().GetAngle() == pytest.approx(0.0, abs=0.05)
+
+
+@pytest.mark.parametrize("actuated, reason", [(None, "rotation limits"), (True, "actuated")])
+def test_limited_or_actuated_ball_stays_decomposed(actuated, reason):
+    from fusion2usd.kinematics import JointDecompositionPass, PassContext
+    model = ball_model()
+    ball = model.joint("ball_joint")
+    ball.exclude_from_articulation = False
+    ball.properties.actuated = actuated
+    if actuated:
+        ball.dofs[2].limit = None
+    report = ExportReport()
+    model = JointDecompositionPass().run(model, PassContext(ExportOptions(spherical_ball_joints=True), report))
+    assert not any(j.name == "ball_joint" for j in model.joints)
+    assert sum(link.is_virtual for link in model.links.values()) == 2
+    assert any(reason in i for i in report.infos)

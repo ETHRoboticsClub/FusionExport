@@ -24,6 +24,7 @@ APPROX = [(a.value, a.value) for a in CollisionApproximation]
 _FLAGS = (  # (input id, ExportOptions field, label)
     ("probe", "probe_joints", "Probe joint axes"),
     ("mimic", "export_mimic_joints", "Export motion links as mimic joints"),
+    ("spherical", "spherical_ball_joints", "Passive ball joints as spherical joints"),
     ("isaaclab", "write_isaaclab_cfg", "Write Isaac Lab config"),
     ("urdf", "write_urdf", "Write URDF"),
     ("model_json", "write_model_json", "Write model JSON"),

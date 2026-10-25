@@ -64,7 +64,8 @@ class ExportOptions:
     # kinematics
     probe_joints: bool = True                 # nudge each joint in Fusion to measure true axis/sign
     disconnected: DisconnectedPolicy = DisconnectedPolicy.FIX_TO_BASE
-    export_mimic_joints: bool = True          # Fusion motion links -> PhysxMimicJointAPI
+    export_mimic_joints: bool = True          # Fusion motion links -> PhysxMimicJointAPI + NewtonMimicAPI
+    spherical_ball_joints: bool = False       # passive ball joints -> PhysicsSphericalJoint, no helper links
     virtual_link_mass: float = 1e-3           # kg, for helper links of decomposed multi-DOF joints
     virtual_link_inertia: float = 1e-6        # kg·m²
     min_mass: float = 1e-4

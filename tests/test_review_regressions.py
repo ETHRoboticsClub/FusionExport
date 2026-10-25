@@ -91,3 +91,4 @@ def test_mimic_offset_in_degrees_for_revolute_follower():
     prim = stage.get("/gripper/joints/Revolute_2")
     # reversed follower: offset -> -0.1 rad; PhysX offset = -(that) in degrees
     assert prim.get("physxMimicJoint:rotX:offset").value == pytest.approx(math.degrees(0.1))
+    assert prim.get("newton:mimicCoef0").value == pytest.approx(-math.degrees(0.1))

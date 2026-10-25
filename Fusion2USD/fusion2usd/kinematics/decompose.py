@@ -4,12 +4,15 @@ PhysX articulations (and Isaac Lab's joint indexing) handle revolute/prismatic j
 Fusion cylindrical, pin-slot, planar or ball joint becomes parent → helper → ... → child with one
 DOF per joint. Helper links are tiny virtual bodies at the joint origin. Multi-DOF joints that were
 excluded from the articulation (loop closures) stay whole; the USD writer emits them as D6 joints.
+
+With ``spherical_ball_joints``, passive ball joints stay whole instead (also loop closures) and are
+written as ``PhysicsSphericalJoint``, which Newton/Kamino and PhysX solve natively.
 """
 
 from __future__ import annotations
 
 import copy
-from typing import Dict
+from typing import Dict, Set
 
 from ..core.inertia import MassProperties
 from ..core.math3d import Transform, Vec3
@@ -23,8 +26,13 @@ class JointDecompositionPass(ModelPass):
         joint_names = NameRegistry(reserved={j.name for j in model.joints} | {"root_joint"})
         link_names = NameRegistry(reserved=set(model.links) | {"joints", "Looks"})
         dof_map: Dict[DofRef, DofRef] = {}
+        coupled = {r.joint for c in model.couplings for r in (c.leader, c.follower)}
         result = []
         for joint in model.joints:
+            if ctx.options.spherical_ball_joints and self._as_spherical(joint, coupled, ctx):
+                joint.metadata["spherical"] = True
+                result.append(joint)
+                continue
             if len(joint.dofs) <= 1 or joint.exclude_from_articulation:
                 result.append(joint)
                 continue
@@ -34,6 +42,26 @@ class JointDecompositionPass(ModelPass):
             c.leader = dof_map.get(c.leader, c.leader)
             c.follower = dof_map.get(c.follower, c.follower)
         return model
+
+    @staticmethod
+    def _as_spherical(joint: Joint, coupled: Set[str], ctx: PassContext) -> bool:
+        if len(joint.dofs) != 3 or any(d.type is not DofType.ROTATION for d in joint.dofs):
+            return False
+        # A spherical joint has no per-axis drive, mimic or box limit; keep the decomposed chain for those.
+        reason = None
+        if joint.properties.actuated:
+            reason = "it is actuated"
+        elif joint.name in coupled:
+            reason = "it is part of a motion link"
+        elif any(d.limit is not None and d.limit.is_bounded for d in joint.dofs):
+            reason = "it has rotation limits"
+        if reason:
+            ctx.report.info(f"Ball joint {joint.name!r} is decomposed, not spherical: {reason}")
+            return False
+        dropped = [f for f in _DYNAMICS_FIELDS if getattr(joint.properties, f) is not None]
+        if dropped:
+            ctx.report.warn(f"Ball joint {joint.name!r}: {', '.join(dropped)} not exported for spherical joints")
+        return True
 
     @staticmethod
     def _split(model: RobotModel, joint: Joint, joint_names: NameRegistry, link_names: NameRegistry,
@@ -115,3 +143,4 @@ class JointDecompositionPass(ModelPass):
 
 
 _UNIT_FIELDS = ("effort", "velocity", "stiffness", "damping", "armature")
+_DYNAMICS_FIELDS = _UNIT_FIELDS + ("friction",)
