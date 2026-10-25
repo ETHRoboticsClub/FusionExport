@@ -1,8 +1,8 @@
 """Builds the articulation tree: base selection, spanning tree, loop closure, orientation.
 
-PhysX reduced-coordinate articulations must be trees. Closed kinematic loops are kept by
-excluding one joint per loop from the articulation (``physics:excludeFromArticulation``);
-PhysX then solves that joint as a regular maximal-coordinate constraint.
+Reduced-coordinate articulations (PhysX, Newton) must be trees. Closed kinematic loops are kept by
+excluding one joint per loop from the articulation (``physics:excludeFromArticulation``); the
+simulator then solves that joint as a maximal-coordinate constraint.
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ class KinematicTreePass(ModelPass):
                 j.loop_closure_preferred,       # user asked to cut here
                 j.name not in coupled,          # mimic joints must stay in the articulation
                 j.properties.actuated is False, # keep actuated joints in reduced coordinates
-                len(j.dofs) > 1,                # multi-DOF joints cut cheaply (no helper links)
+                len(j.dofs) > 1,                # cut multi-DOF joints first: no helper links, fewer constraint rows
                 idx,
             )
             adjacency[j.parent].append((cost, j))

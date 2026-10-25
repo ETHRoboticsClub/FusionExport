@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fusion2usd"
 version = "0.1.0"
-description = "Export Autodesk Fusion assemblies (incl. closed loops and motion links) to USD for Isaac Lab"
+description = "Export Autodesk Fusion assemblies (incl. closed loops and motion links) to USD for PhysX (Isaac Lab) and Newton"
 requires-python = ">=3.9"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -14,6 +14,7 @@ dependencies = []
 [project.optional-dependencies]
 binary = ["usd-core>=24.0"]   # only needed for .usdc output outside Fusion
 dev = ["pytest>=7", "usd-core>=24.0"]
+newton = ["newton[sim,importers]>=1.7"]  # tools/newton_smoke_test.py and tests/test_newton_sim.py
 
 [project.scripts]
 fusion2usd = "fusion2usd.cli:main"

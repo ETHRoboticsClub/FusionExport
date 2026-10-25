@@ -7,6 +7,7 @@ import os
 from typing import List, Mapping, Optional
 
 from ..model.robot import DofType, Joint, RobotModel
+from ..options import PhysicsEngine
 from . import roles
 from .pipeline import ModelPass, PassContext
 
@@ -18,14 +19,14 @@ _DEFAULTED = ("effort", "velocity", "stiffness", "damping")
 
 
 class MassSanitizePass(ModelPass):
-    """PhysX rejects zero/negative mass and inertia; clamp them and say so."""
+    """Simulators reject zero/negative mass and inertia; clamp them and say so."""
 
     def run(self, model: RobotModel, ctx: PassContext) -> RobotModel:
         opts = ctx.options
         for link in model.links.values():
             if link.mass is None:
                 if not link.is_virtual:
-                    ctx.report.warn(f"Link {link.name!r} has no mass properties; PhysX will derive them from collision geometry")
+                    ctx.report.warn(f"Link {link.name!r} has no mass properties; the simulator derives them from its colliders")
                 continue
             if link.mass.mass < opts.min_mass:
                 ctx.report.warn(f"Link {link.name!r} mass {link.mass.mass:.3g} kg clamped to {opts.min_mass:g} kg")
@@ -42,7 +43,9 @@ class ValidationPass(ModelPass):
         warn_continuous = not self._flag(DISABLE_CONTINUOUS_WARN_ENV)
         follower_joints = {c.follower.joint for c in model.couplings} if ctx.options.export_mimic_joints else set()
         for joint in model.joints:
-            if warn_continuous:
+            # Newton writes ball joints as spherical joints, whose limits are not exported anyway
+            newton_ball = joint.is_ball and ctx.options.physics_engine is PhysicsEngine.NEWTON
+            if warn_continuous and not newton_ball:
                 self._check_continuous(joint, allowed, ctx)
             if roles.is_driven(joint, follower_joints, ctx.options):
                 self._check_defaults(joint, ctx)

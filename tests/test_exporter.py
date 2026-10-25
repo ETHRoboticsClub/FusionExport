@@ -69,7 +69,7 @@ def test_custom_and_failing_actions(tmp_path):
     opts = ExportOptions(output_path=str(tmp_path / "r.usda"), write_isaaclab_cfg=False)
     report = Exporter(opts, actions=[SummaryAction(), BrokenAction()]).export(ModelFileSource(dump(gripper(), tmp_path)))
     assert (tmp_path / "r_summary.txt").exists()
-    assert any("broken" in w and "boom" in w for w in report.warnings)
+    assert any("broken" in w and "boom" in w for w in report.errors)
 
 
 def test_action_by_module_path_and_unknown(tmp_path):
@@ -77,7 +77,7 @@ def test_action_by_module_path_and_unknown(tmp_path):
                          post_actions=["test_exporter:SummaryAction", "does_not_exist"])
     report = Exporter(opts).export(ModelFileSource(dump(gripper(), tmp_path)))
     assert (tmp_path / "r_summary.txt").exists()
-    assert any("does_not_exist" in w for w in report.warnings)
+    assert any("does_not_exist" in w for w in report.errors)
 
 
 def test_cli(tmp_path, capsys):
@@ -85,3 +85,11 @@ def test_cli(tmp_path, capsys):
     assert cli_main([src, "-o", str(tmp_path / "cli" / "fb.usda"), "--zero-pose", "current", "--action", "urdf"]) == 0
     assert os.path.exists(tmp_path / "cli" / "fb.urdf")
     assert "Wrote:" in capsys.readouterr().out
+
+
+def test_cli_engine_and_exit_code(tmp_path):
+    src = dump(four_bar(), tmp_path)
+    out = tmp_path / "n" / "fb.usda"
+    assert cli_main([src, "-o", str(out), "--engine", "newton", "--no-isaaclab-cfg"]) == 0
+    assert "NewtonArticulationRootAPI" in out.read_text()
+    assert cli_main([src, "-o", str(out), "--action", "does_not_exist", "--no-isaaclab-cfg"]) == 1

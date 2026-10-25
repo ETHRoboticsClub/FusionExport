@@ -48,6 +48,26 @@ class Checks:
         print(f"[{'PASS' if ok else 'FAIL'}] {label}" + (f": {detail}" if detail else ""), flush=True)
 
 
+DEG = 180.0 / math.pi
+
+
+def mimic_terms(prim):
+    """For a mimic follower (PhysX or Newton schema): leader path, q_l -> expected q_f (rad / m), offset attr."""
+    f_scale = DEG if prim.IsA(UsdPhysics.RevoluteJoint) else 1.0  # USD units: deg for revolute joints, else m
+    for schema in prim.GetPrimTypeInfo().GetAppliedAPISchemas():  # authored, also if the schema is unregistered
+        if schema == "NewtonMimicAPI":  # q_f = coef0 + coef1 q_l; coef0 in USD units, coef1 in joint coordinates
+            leader = prim.GetRelationship("newton:mimicJoint").GetTargets()[0]
+            coef0, coef1 = prim.GetAttribute("newton:mimicCoef0"), prim.GetAttribute("newton:mimicCoef1").Get()
+            return leader, lambda q_l: coef0.Get() / f_scale + coef1 * q_l, coef0
+        if schema.startswith("PhysxMimicJointAPI:"):  # q_f + gearing q_l + offset = 0 in USD units
+            ns = f"physxMimicJoint:{schema.split(':', 1)[1]}"
+            leader = prim.GetRelationship(f"{ns}:referenceJoint").GetTargets()[0]
+            l_scale = DEG if prim.GetStage().GetPrimAtPath(leader).IsA(UsdPhysics.RevoluteJoint) else 1.0
+            gearing, offset = prim.GetAttribute(f"{ns}:gearing").Get(), prim.GetAttribute(f"{ns}:offset")
+            return leader, lambda q_l: -(gearing * q_l * l_scale + offset.Get()) / f_scale, offset
+    return None
+
+
 def load_exported_cfg(path: str):
     spec = importlib.util.spec_from_file_location("exported_cfg", path)
     module = importlib.util.module_from_spec(spec)
@@ -96,10 +116,9 @@ def main() -> int:
     scene = InteractiveScene(scene_cfg)
     if args.mimic_offset_probe:
         for prim in sim.stage.Traverse():
-            for schema in prim.GetAppliedSchemas():
-                # angular followers only (prismatic followers also use rot* tokens; an offset there is meters)
-                if schema.startswith("PhysxMimicJointAPI:") and prim.IsA(UsdPhysics.RevoluteJoint):
-                    prim.GetAttribute(f"physxMimicJoint:{schema.split(':', 1)[1]}:offset").Set(args.mimic_offset_probe)
+            terms = mimic_terms(prim)
+            if terms and prim.IsA(UsdPhysics.RevoluteJoint):  # angular followers only: the offset is in degrees
+                terms[2].Set(args.mimic_offset_probe)
     sim.reset()
     robot = scene["robot"]
     checks = Checks()
@@ -168,25 +187,15 @@ def main() -> int:
         gap = (w0 - w1).norm(dim=-1).max().item()
         checks.check(gap < args.loop_tol, f"loop closure {prim.GetName()} stays closed", f"gap {gap:.2e} m")
 
-    # -- mimic joints: move the leader, the follower must obey q_f + gearing*q_l + offset = 0 (USD units)
+    # -- mimic joints: move the leader, the follower must obey the authored coupling
     joint_index = {name: i for i, name in enumerate(robot.joint_names)}
     for prim in stage.Traverse():
-        if not str(prim.GetPath()).startswith(env0_prefix):
-            continue
-        for schema in prim.GetAppliedSchemas():
-            if not schema.startswith("PhysxMimicJointAPI:"):
-                continue
-            inst = schema.split(":", 1)[1]
-            ns = f"physxMimicJoint:{inst}"
-            leader = prim.GetRelationship(f"{ns}:referenceJoint").GetTargets()[0].name
-            gearing = prim.GetAttribute(f"{ns}:gearing").Get()
-            offset = prim.GetAttribute(f"{ns}:offset").Get()
+        terms = mimic_terms(prim) if str(prim.GetPath()).startswith(env0_prefix) else None
+        if terms:
+            leader_prim, expected_of, _ = terms
+            leader = leader_prim.name
             lf, ll = joint_index[prim.GetName()], joint_index[leader]
-            leader_prim = prim.GetRelationship(f"{ns}:referenceJoint").GetTargets()[0]
             leader_revolute = stage.GetPrimAtPath(leader_prim).IsA(UsdPhysics.RevoluteJoint)
-            # USD units: degrees for revolute joints, meters for prismatic ones (joint type, not instance name)
-            f_scale = 180.0 / math.pi if prim.IsA(UsdPhysics.RevoluteJoint) else 1.0
-            l_scale = 180.0 / math.pi if leader_revolute else 1.0
             lo, hi = T(robot.data.soft_joint_pos_limits)[0, ll].tolist()
             step = 0.3 if leader_revolute else 0.01
             target = default_q.clone()
@@ -199,13 +208,12 @@ def main() -> int:
                 scene.update(sim.get_physics_dt())
             q_l = T(robot.data.joint_pos)[0, ll].item()
             q_f = T(robot.data.joint_pos)[0, lf].item()
-            expected = -(gearing * q_l * l_scale + offset) / f_scale
+            expected = expected_of(q_l)
             err = abs(q_f - expected)
             # an inactive mimic leaves the follower where it started, which can be close to "expected" by luck
             moved = abs(q_f - q_f_start) > 0.5 * abs(expected - q_f_start) or abs(expected - q_f_start) < args.mimic_tol
             checks.check(err < args.mimic_tol and moved, f"mimic {prim.GetName()} follows {leader}",
-                         f"q_f={q_f:.4f} (start {q_f_start:.4f}), expected {expected:.4f} "
-                         f"(gearing {gearing:g}, offset {offset:g})")
+                         f"q_f={q_f:.4f} (start {q_f_start:.4f}), expected {expected:.4f}")
 
     # -- sensors from the exported cfg's sensors() factory
     for name, cfg in sensor_cfgs.items():

@@ -1,4 +1,6 @@
-"""Turns a kinematically processed ``RobotModel`` into a USD Physics / PhysX articulation stage.
+"""Turns a kinematically processed ``RobotModel`` into a USD Physics articulation stage.
+
+Engine-specific schemas (PhysX or Newton) come from ``engines``; everything written here is plain UsdPhysics.
 
 Layout (flat, like the Isaac Sim URDF importer)::
 
@@ -19,7 +21,8 @@ from ..core.report import ExportReport
 from ..model.robot import (
     Coupling, Dof, DofType, Joint, JointKind, Link, Material, Mesh, RobotModel, Sensor, SensorKind,
 )
-from ..options import CollisionApproximation, ExportOptions
+from ..options import CollisionApproximation, ExportOptions, PhysicsEngine, ZeroPose
+from .engines import EngineSchemas, engine_schemas
 from .plan import JOINTS, LOOKS, ROOT_JOINT, ExportPlan
 from .usda import Prim, UsdaStage
 
@@ -27,7 +30,8 @@ DEG = 180.0 / math.pi
 MIMIC_LIMIT_DEG = 3600.0  # finite stand-in for continuous revolute joints in mimic pairs
 INF = math.inf
 _AXES = ("X", "Y", "Z")
-_ALIGN_TOL = math.cos(1e-3)
+_ALIGN_EPS = 1e-3                 # rad; D6 DOF axes closer than this to a frame axis are aligned
+_SNAP_TOL = math.cos(math.radians(2.0))  # up to this, a DOF axis is snapped to the frame axis with a warning
 
 
 def _pose_attrs(prim: Prim, index: int, pose: Transform) -> None:
@@ -72,12 +76,13 @@ class UsdRobotBuilder:
         if model.metadata:
             root.custom_data.update(model.metadata)
 
-        _StageWriter(model, plan, self.options, self.report, stage, root).write()
+        engine = engine_schemas(self.options.physics_engine)
+        _StageWriter(model, plan, self.options, self.report, stage, root, engine).write()
         # Fixed base: the root Xform (the world joint pins the base). Floating base: the base link,
-        # so PhysX does not pick some other link as the articulation's root.
+        # so the simulator does not pick some other link as the articulation's root.
         art = root if model.fixed_base else stage.get(plan.link_path(model.base_link))
-        art.apply("PhysicsArticulationRootAPI", "PhysxArticulationAPI")
-        art.attr("physxArticulation:enabledSelfCollisions", "bool", bool(self.options.self_collisions))
+        art.apply("PhysicsArticulationRootAPI")
+        engine.articulation_root(art, bool(self.options.self_collisions))
         return stage
 
 
@@ -85,13 +90,15 @@ class _StageWriter:
     """One-shot helper holding the per-build state."""
 
     def __init__(self, model: RobotModel, plan: ExportPlan, options: ExportOptions,
-                 report: ExportReport, stage: UsdaStage, root: Prim) -> None:
+                 report: ExportReport, stage: UsdaStage, root: Prim, engine: EngineSchemas) -> None:
         self.model = model
         self.plan = plan
         self.options = options
         self.report = report
         self.stage = stage
         self.root = root
+        self.engine = engine
+        self.newton = options.physics_engine is PhysicsEngine.NEWTON
         self.filtered: Dict[str, List[str]] = {}  # child link -> parent link paths
 
     def write(self) -> None:
@@ -104,6 +111,8 @@ class _StageWriter:
             self._write_joint(joints, joint)
         for coupling in self.plan.mimics:
             self._write_mimic(coupling)
+        if self.newton:
+            self._newton_notes()
         for sensor in self.model.sensors:
             self._write_sensor(sensor)
         self._filter_decomposed_chains()
@@ -124,7 +133,7 @@ class _StageWriter:
         _xform_attrs(prim, t)
         prim.apply("PhysicsRigidBodyAPI", "PhysicsMassAPI")
         if link.mass is None:
-            self.report.warn(f"link {link.name!r} has no mass properties; PhysX will derive them from density")
+            self.report.warn(f"link {link.name!r} has no mass properties; the simulator derives them from its colliders")
         else:
             diag, axes = link.mass.principal()
             prim.attr("physics:mass", "float", link.mass.mass)
@@ -163,10 +172,7 @@ class _StageWriter:
             m = self._write_mesh(scope, names.claim(mesh.name, "collision"), mesh, visual=False)
             if m is None:
                 continue
-            m.apply("PhysicsCollisionAPI", "PhysicsMeshCollisionAPI")
-            m.attr("physics:approximation", "uniform token", approx)
-            if approx == CollisionApproximation.SDF.value:
-                m.apply("PhysxSDFMeshCollisionAPI")
+            self.engine.collision(m, approx)
 
     def _write_mesh(self, parent: Prim, name: str, mesh: Mesh, visual: bool) -> Optional[Prim]:
         if not mesh.vertex_count or not mesh.triangle_count:
@@ -222,8 +228,10 @@ class _StageWriter:
             self.report.warn(f"joint {joint.name!r} references a missing link, skipped")
             return
         kind = joint.kind
-        spherical = bool(joint.metadata.get("spherical"))
-        if kind is JointKind.MULTI and not spherical and not joint.exclude_from_articulation:
+        # Newton solves multi-DOF joints in reduced coordinates; PhysX gets them split (see decompose).
+        spherical = self.newton and joint.is_ball
+        native_multi = self.newton and kind is JointKind.MULTI
+        if kind is JointKind.MULTI and not native_multi and not joint.exclude_from_articulation:
             self.report.warn(f"joint {joint.name!r} has several DOFs but is part of the articulation; "
                              "writing it as an excluded D6 joint")
         type_name = "PhysicsSphericalJoint" if spherical else {
@@ -237,19 +245,24 @@ class _StageWriter:
         prim.rel("physics:body1", [self.plan.link_path(joint.child)])
 
         if spherical:
-            # Unlimited, so the frames only need to coincide at the export pose (like free D6 rotations).
+            # No limits, so the frames only need to coincide at the export pose (like free D6 rotations).
             frame, motion = self._joint_frame(joint), Transform.identity()
             prim.attr("physics:axis", "uniform token", "X")
+            if any(d.limit is not None and d.limit.is_bounded for d in joint.dofs):
+                self.report.warn(f"joint {joint.name!r}: ball-joint limits are not exported (a spherical joint "
+                                 "only has a cone limit)")
         elif kind is JointKind.MULTI:
             frame, motion = self._write_d6(prim, joint)
         else:
             frame = self._joint_frame(joint)
             motion = _dof_motion(joint.dofs[0].type, Vec3(1.0, 0.0, 0.0), joint.dofs[0].value) \
                 if joint.dofs else Transform.identity()
+        if native_multi:
+            self._check_passive_multi(joint)
         _pose_attrs(prim, 0, parent.transform.inverse() * frame)
         _pose_attrs(prim, 1, child.transform.inverse() * frame * motion)
 
-        excluded = joint.exclude_from_articulation or (kind is JointKind.MULTI and not spherical)
+        excluded = joint.exclude_from_articulation or (kind is JointKind.MULTI and not native_multi)
         prim.attr("physics:jointEnabled", "bool", bool(joint.enabled))
         prim.attr("physics:collisionEnabled", "bool", False)
         prim.attr("physics:excludeFromArticulation", "bool", excluded)
@@ -277,8 +290,7 @@ class _StageWriter:
             data["source"] = sensor.source
 
         if sensor.kind is SensorKind.CONTACT:
-            link_prim.apply("PhysxContactReportAPI")
-            link_prim.attr("physxContactReport:threshold", "float", float(sensor.params.get("force_threshold") or 0.0))
+            self.engine.contact_sensor(link_prim, float(sensor.params.get("force_threshold") or 0.0))
             link_prim.custom_data.setdefault("contact_sensors", []).append(sensor.name)
             return
         if sensor.kind is SensorKind.CAMERA:
@@ -329,10 +341,10 @@ class _StageWriter:
         dof_name = "angular" if angular else "linear"
         prim.attr("physics:axis", "uniform token", "X")
         lo, hi = _limit_pair(dof.limit.lower if dof.limit else None, dof.limit.upper if dof.limit else None, scale)
-        if angular and joint.name in self.plan.mimic_joints and not (math.isfinite(lo) and math.isfinite(hi)):
-            # PhysX (Isaac Sim 6.2) and NewtonMimicAPI both need finite limits on revolute mimic joints.
+        if (angular and self.engine.mimic_needs_finite_limits and joint.name in self.plan.mimic_joints
+                and not (math.isfinite(lo) and math.isfinite(hi))):
             lo, hi = max(lo, -MIMIC_LIMIT_DEG), min(hi, MIMIC_LIMIT_DEG)
-            self.report.warn(f"joint {joint.name!r} is part of a mimic coupling; PhysX and Newton need finite limits, "
+            self.report.warn(f"joint {joint.name!r} is part of a mimic coupling; PhysX needs finite limits, "
                              f"so it was limited to ±{MIMIC_LIMIT_DEG:g}°")
         if dof.limit is not None and dof.limit.is_bounded or (math.isfinite(lo) and math.isfinite(hi)):
             prim.attr("physics:lowerLimit", "float", lo)
@@ -355,21 +367,10 @@ class _StageWriter:
             prim.attr(f"{ns}:targetPosition", "float", target * scale)
             prim.attr(f"{ns}:targetVelocity", "float", 0.0)
 
-        # Also on loop-closure joints: PhysX ignores it there, but it records the position the limits refer to.
-        prim.apply(f"PhysicsJointStateAPI:{dof_name}")
-        prim.attr(f"state:{dof_name}:physics:position", "float", dof.value * scale)
-        prim.attr(f"state:{dof_name}:physics:velocity", "float", 0.0)
-
-        physx = {
-            "physxJoint:maxJointVelocity": None if props.velocity is None else props.velocity * scale,
-            "physxJoint:armature": props.armature,
-            "physxJoint:jointFriction": props.friction,
-        }
-        physx = {k: v for k, v in physx.items() if v is not None}
-        if physx:
-            prim.apply("PhysxJointAPI")
-            for name, value in physx.items():
-                prim.attr(name, "float", value)
+        # Also on loop-closure joints: solvers ignore it there, but it records the position the limits refer to.
+        _joint_state(prim, dof_name, dof.value * scale)
+        self.engine.joint_dynamics(prim, props.armature, props.friction,
+                                   None if props.velocity is None else props.velocity * scale)
 
     def _write_d6(self, prim: Prim, joint: Joint) -> Tuple[Transform, Transform]:
         """Generic joint: free DOFs map to frame axes, every other axis is locked."""
@@ -382,10 +383,10 @@ class _StageWriter:
         frame_axes = [frame.axis(i) for i in range(3)]
 
         free: Dict[str, Tuple[Dof, float]] = {}
-        translation = Vec3()
         rotations = [d for d in dofs if d.type is DofType.ROTATION]
-        if len(rotations) == 3:
-            # Ball joint: rotation is entirely free, its axes need not be orthogonal away from zero.
+        ball = len(rotations) == 3
+        if ball:
+            # Rotation is entirely free, its axes need not be orthogonal away from zero.
             for i, axis in enumerate(_AXES):
                 free["rot" + axis] = (rotations[i], 1.0)
             dofs = [d for d in dofs if d.type is not DofType.ROTATION]
@@ -394,64 +395,97 @@ class _StageWriter:
             dots = [a.dot(e) for e in frame_axes]
             i = max(range(3), key=lambda k: abs(dots[k]))
             token = ("rot" if dof.type is DofType.ROTATION else "trans") + _AXES[i]
-            if abs(dots[i]) < _ALIGN_TOL:
-                self.report.warn(f"joint {joint.name!r}: DOF axis {a.as_tuple()} is not aligned with "
-                                 "the joint frame; DOF skipped")
+            off = math.degrees(math.acos(min(1.0, abs(dots[i]))))
+            if abs(dots[i]) < _SNAP_TOL:
+                self.report.warn(f"joint {joint.name!r}: DOF axis {a.as_tuple()} is {off:.1f}° off the joint "
+                                 "frame; DOF skipped")
                 continue
             if token in free:
                 self.report.warn(f"joint {joint.name!r}: duplicate DOF {token}, skipped")
                 continue
-            sign = 1.0 if dots[i] > 0 else -1.0
-            free[token] = (dof, sign)
-            local = Vec3(*(sign if k == i else 0.0 for k in range(3)))
-            if dof.type is DofType.TRANSLATION:
-                translation = translation + local * dof.value
+            if abs(dots[i]) < math.cos(_ALIGN_EPS):
+                self.report.warn(f"joint {joint.name!r}: DOF axis is {off:.2f}° off the joint frame's "
+                                 f"{_AXES[i]} axis; snapped to it")
+            free[token] = (dof, 1.0 if dots[i] > 0 else -1.0)
 
+        rotation, translation = Quat(), Vec3()
         for kind in ("trans", "rot"):
-            for axis in _AXES:
+            for i, axis in enumerate(_AXES):
                 token = kind + axis
-                if token in free:
-                    dof, sign = free[token]
-                    if dof.limit is None or not dof.limit.is_bounded:
-                        continue
+                if token not in free:
+                    prim.apply(f"PhysicsLimitAPI:{token}")
+                    prim.attr(f"limit:{token}:physics:low", "float", 1.0)  # low > high locks the axis
+                    prim.attr(f"limit:{token}:physics:high", "float", -1.0)
+                    continue
+                dof, sign = free[token]
+                if ball:  # free rotations need no encoding: the frames coincide at the export pose
                     if kind == "rot":
-                        self.report.warn(f"joint {joint.name!r}: rotational limits on {token} are not "
-                                         "exported for multi-DOF joints")
+                        if dof.limit is not None and dof.limit.is_bounded:
+                            self.report.warn(f"joint {joint.name!r}: rotational limits on {token} are not "
+                                             "exported for ball joints")
                         continue
-                    limit = dof.limit if sign > 0 else dof.limit.reversed()
-                    low, high = _limit_pair(limit.lower, limit.upper, 1.0)
+                # Encode the value (translations first, then the single rotation), so limits keep the CAD
+                # convention.
+                local = Vec3(*(1.0 if k == i else 0.0 for k in range(3)))
+                value = sign * dof.value
+                scale = DEG if kind == "rot" else 1.0
+                if kind == "rot":
+                    rotation = Quat.from_axis_angle(local, value)
                 else:
-                    low, high = 1.0, -1.0  # low > high locks the axis
+                    translation = translation + local * value
+                _joint_state(prim, token, value * scale)
+                bounded = dof.limit is not None and dof.limit.is_bounded
+                if bounded and kind == "rot" and not self.engine.d6_rotation_limits:
+                    self.report.warn(f"joint {joint.name!r}: rotational limits on {token} are not exported for "
+                                     "multi-DOF joints")
+                    bounded = False
+                if bounded:
+                    limit = dof.limit if sign > 0 else dof.limit.reversed()
+                    low, high = _limit_pair(limit.lower, limit.upper, scale)
+                elif self.engine.d6_free_axes_need_limits:
+                    low, high = -INF, INF
+                else:
+                    continue
                 prim.apply(f"PhysicsLimitAPI:{token}")
                 prim.attr(f"limit:{token}:physics:low", "float", low)
                 prim.attr(f"limit:{token}:physics:high", "float", high)
-        # Free rotations are unconstrained, so their values need not be encoded: the body frames
-        # coincide in orientation at the export pose. Translations are encoded so limits keep the
-        # CAD convention.
-        return frame, Transform(Quat(), translation)
+        return frame, Transform(rotation, translation)
+
+    def _check_passive_multi(self, joint: Joint) -> None:
+        """Native multi-DOF joints are written without drives or per-joint dynamics; say what is dropped."""
+        props = joint.properties
+        if props.actuated is None and self.options.actuate_by_default:
+            self.report.info(f"Joint {joint.name!r} is a passive multi-DOF joint; mark it actuated to drive it")
+        dropped = [f for f in ("effort", "velocity", "stiffness", "damping", "armature", "friction", "target")
+                   if getattr(props, f) is not None]
+        if dropped:
+            self.report.warn(f"joint {joint.name!r}: {', '.join(dropped)} not exported for multi-DOF joints")
 
     def _write_mimic(self, coupling: Coupling) -> None:
         follower = self.model.joint(coupling.follower.joint)
         leader = self.model.joint(coupling.leader.joint)
-        # PhysX (Isaac Sim 6.2) only parses rot* instance/axis tokens; for a prismatic joint the token still
-        # selects its single DOF and the values stay in meters (verified in simulation).
-        inst = ref_axis = "rotX"
         prim = self.stage.get(self.plan.joint_path(follower.name))
         if prim is None:
             return
-        ns = f"physxMimicJoint:{inst}"
-        prim.apply(f"PhysxMimicJointAPI:{inst}")
-        prim.rel(f"{ns}:referenceJoint", [self.plan.joint_path(leader.name)])
-        prim.attr(f"{ns}:referenceJointAxis", "uniform token", ref_axis)
         f_scale = DEG if follower.kind is JointKind.REVOLUTE else 1.0
         l_scale = DEG if leader.kind is JointKind.REVOLUTE else 1.0
-        # q_f = r q_l + c  in SI  ->  q_f' + gearing q_l' + offset = 0  in USD units (deg / m)
-        prim.attr(f"{ns}:gearing", "float", -coupling.ratio * f_scale / l_scale)
-        prim.attr(f"{ns}:offset", "float", -coupling.offset * f_scale)
+        self.engine.mimic(prim, self.plan.joint_path(leader.name), coupling, f_scale, l_scale)
 
-        # Newton: q_f = coef1 q_l + coef0, coef0 in follower USD units. NVIDIA's schema doc puts coef1 in USD
-        # units too, but Newton's importer applies it unconverted in joint coordinates (rad / m), so use SI.
-        prim.apply("NewtonMimicAPI")
-        prim.rel("newton:mimicJoint", [self.plan.joint_path(leader.name)])
-        prim.attr("newton:mimicCoef0", "float", coupling.offset * f_scale)
-        prim.attr("newton:mimicCoef1", "float", coupling.ratio)
+    def _newton_notes(self) -> None:
+        """Newton behaviors (verified with Newton 1.7) that change how the export has to be loaded."""
+        if self.plan.mimics:
+            self.report.warn("Newton's Kamino solver ignores mimic joints; motion links only couple with the "
+                             "MuJoCo, Featherstone or XPBD solvers")
+        if self.options.zero_pose is ZeroPose.FUSION and any(d.value for j in self.model.joints for d in j.dofs):
+            if any(j.exclude_from_articulation for j in self.model.joints):
+                self.report.warn("Newton's MuJoCo solver anchors loop closures at joint zero, so with Joint zero = "
+                                 "Fusion they drift open; export with Joint zero = Current pose")
+            self.report.warn("Newton's add_usd ignores joint positions (JointStateAPI) unless SchemaResolverPhysx "
+                             "is passed, so joints load at Fusion's joint zero, and the Isaac Lab cfg's init_state "
+                             "only covers single-DOF joints; choose Joint zero = Current pose")
+
+
+def _joint_state(prim: Prim, dof_name: str, position: float) -> None:
+    prim.apply(f"PhysicsJointStateAPI:{dof_name}")
+    prim.attr(f"state:{dof_name}:physics:position", "float", position)
+    prim.attr(f"state:{dof_name}:physics:velocity", "float", 0.0)

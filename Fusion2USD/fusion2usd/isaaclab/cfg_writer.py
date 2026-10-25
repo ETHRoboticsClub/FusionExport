@@ -1,4 +1,4 @@
-"""Generates an Isaac Lab 2.x ``ArticulationCfg`` module for an exported robot."""
+"""Generates an Isaac Lab 3.x ``ArticulationCfg`` module for an exported robot."""
 
 from __future__ import annotations
 

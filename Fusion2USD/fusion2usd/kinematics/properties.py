@@ -16,6 +16,7 @@ from ..core.report import ExportReport
 from ..model.robot import Joint, JointProperties, Limit, Link, RobotModel
 from ..core.inertia import MassProperties
 from ..core.math3d import Vec3
+from ..options import CollisionApproximation
 from .pipeline import ModelPass, PassContext
 
 _UNITS: Dict[str, float] = {
@@ -232,17 +233,42 @@ class PropertiesPass(ModelPass):
         if "mass" in raw:
             mass = parser.number(raw["mass"], where)
             if mass is not None and mass > 0:
-                link.mass = (link.mass.scaled_mass(mass) if link.mass
-                             else MassProperties(mass, Vec3(), _iso(ctx.options.min_inertia)))
+                link.mass = link.mass.scaled_mass(mass) if link.mass else _box_mass(link, mass, ctx)
         collision = raw.get("collision", raw.get("collision_approximation"))
         if collision is not None and str(collision).strip():
-            link.collision_approximation = str(collision).strip()
+            link.collision_approximation = _collision_approximation(str(collision), where, ctx) \
+                or link.collision_approximation
         if "base" in raw and parser.boolean(raw["base"], where) and not ctx.options.base_link:
             model.base_link = link.name
 
         user = {k: ValueParser.loose(v) for k, v in raw.items() if k not in _LINK_DIRECTIVES}
         if user:
             link.metadata.setdefault("user", {}).update(user)
+
+
+def _box_mass(link: Link, mass: float, ctx: PassContext) -> MassProperties:
+    """A body Fusion gave no mass: treat it as a solid box over its mesh bounds."""
+    bounds = [m.bounds() for m in (link.collisions or link.visuals) if m.vertex_count]
+    if not bounds:
+        ctx.report.warn(f"Link {link.name!r}: mass override on a body without geometry; inertia set to the minimum")
+        return MassProperties(mass, Vec3(), _iso(ctx.options.min_inertia))
+    lo = Vec3(*map(min, zip(*(tuple(b[0]) for b in bounds))))
+    hi = Vec3(*map(max, zip(*(tuple(b[1]) for b in bounds))))
+    x, y, z = hi - lo
+    ctx.report.info(f"Link {link.name!r}: inertia of the mass override estimated as a solid box over its meshes")
+    k = mass / 12.0
+    return MassProperties(mass, (lo + hi) * 0.5, ((k * (y * y + z * z), 0.0, 0.0), (0.0, k * (x * x + z * z), 0.0),
+                                                 (0.0, 0.0, k * (x * x + y * y))))
+
+
+def _collision_approximation(value: str, where: str, ctx: PassContext) -> Optional[str]:
+    """Accepts the USD tokens in any case and with separators (``convex_hull``, ``Convex Hull``)."""
+    key = re.sub(r"[\s_-]", "", value).lower()
+    for approx in CollisionApproximation:
+        if approx.value.lower() == key:
+            return approx.value
+    ctx.report.warn(f"{where}: unknown collision approximation {value.strip()!r}; using the export default")
+    return None
 
 
 def _iso(value: float):

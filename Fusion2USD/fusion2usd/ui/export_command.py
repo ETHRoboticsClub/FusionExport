@@ -9,11 +9,12 @@ from typing import Any
 import adsk.core
 import adsk.fusion
 
-from ..options import CollisionApproximation, ExportOptions, MeshQuality, ZeroPose
+from ..options import CollisionApproximation, ExportOptions, MeshQuality, PhysicsEngine, ZeroPose
 from .base import CommandBase
 from .inputs import add_dropdown, bool_value, dropdown_value, string_value
 from .settings import OptionsStore
 
+ENGINE = [("PhysX (Isaac Sim / Isaac Lab)", PhysicsEngine.PHYSX.value), ("Newton", PhysicsEngine.NEWTON.value)]
 UP_AXIS = [("Auto (modeling preference)", "auto"), ("Y up", "Y"), ("Z up", "Z")]
 ZERO_POSE = [("Fusion joint zero", ZeroPose.FUSION.value), ("Current pose", ZeroPose.CURRENT.value)]
 FIXED_BASE = [("Auto (grounded in Fusion)", "auto"), ("Fixed", "fixed"), ("Floating", "floating")]
@@ -24,7 +25,6 @@ APPROX = [(a.value, a.value) for a in CollisionApproximation]
 _FLAGS = (  # (input id, ExportOptions field, label)
     ("probe", "probe_joints", "Probe joint axes"),
     ("mimic", "export_mimic_joints", "Export motion links as mimic joints"),
-    ("spherical", "spherical_ball_joints", "Passive ball joints as spherical joints"),
     ("isaaclab", "write_isaaclab_cfg", "Write Isaac Lab config"),
     ("urdf", "write_urdf", "Write URDF"),
     ("model_json", "write_model_json", "Write model JSON"),
@@ -56,6 +56,7 @@ class ExportCommand(CommandBase):
         inputs.addStringValueInput("output", "Output file", opts.output_path)
         inputs.addBoolValueInput("browse_output", "Browse…", False, "", False)
         inputs.addStringValueInput("robot_name", "Robot name", opts.robot_name or "")
+        add_dropdown(inputs, "engine", "Physics engine", ENGINE, opts.physics_engine.value)
         add_dropdown(inputs, "zero_pose", "Joint zero", ZERO_POSE, opts.zero_pose.value)
         up = opts.source_up_axis.upper() if opts.source_up_axis.upper() in ("Y", "Z") else "auto"
         add_dropdown(inputs, "up_axis", "Source up axis", UP_AXIS, up)
@@ -104,6 +105,7 @@ class ExportCommand(CommandBase):
         opts = self.store.load()
         opts.output_path = string_value(inputs, "output")
         opts.robot_name = string_value(inputs, "robot_name") or None
+        opts.physics_engine = PhysicsEngine(dropdown_value(inputs, "engine", ENGINE))
         opts.zero_pose = ZeroPose(dropdown_value(inputs, "zero_pose", ZERO_POSE))
         opts.source_up_axis = dropdown_value(inputs, "up_axis", UP_AXIS)
         opts.fixed_base = {"auto": None, "fixed": True, "floating": False}[

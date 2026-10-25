@@ -180,6 +180,10 @@ class Joint:
             return JointKind.MULTI
         return JointKind.REVOLUTE if self.dofs[0].type is DofType.ROTATION else JointKind.PRISMATIC
 
+    @property
+    def is_ball(self) -> bool:
+        return len(self.dofs) == 3 and all(d.type is DofType.ROTATION for d in self.dofs)
+
     def reversed(self) -> "Joint":
         """Same constraint with parent and child swapped (motion signs and DOF order flip)."""
         j = copy.copy(self)

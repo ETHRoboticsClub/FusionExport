@@ -107,12 +107,12 @@ class Exporter:
                 try:
                     actions.append(create_action(spec))
                 except Exception as exc:  # noqa: BLE001 - a bad plugin must not lose the USD
-                    artifacts.report.warn(f"Post-export action {spec!r} could not be loaded: {exc}")
+                    artifacts.report.error(f"Post-export action {spec!r} could not be loaded: {exc}")
         for action in actions:
             try:
                 paths = action.run(artifacts)
                 artifacts.written.extend(paths)
                 artifacts.report.outputs.extend(paths)
             except Exception:  # noqa: BLE001
-                artifacts.report.warn(f"Post-export action {action.name or type(action).__name__!r} failed:\n"
+                artifacts.report.error(f"Post-export action {action.name or type(action).__name__!r} failed:\n"
                                       f"{traceback.format_exc()}")

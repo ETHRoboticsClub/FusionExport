@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from .actions import registered_actions
 from .exporter import Exporter, ModelFileSource
-from .options import CollisionApproximation, ExportOptions, ZeroPose
+from .options import CollisionApproximation, ExportOptions, PhysicsEngine, ZeroPose
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("-o", "--output", required=True, help="output .usda/.usd/.usdc")
     p.add_argument("--options", help="ExportOptions JSON (as saved by the add-in)")
     p.add_argument("--name", help="robot name")
+    p.add_argument("--engine", choices=[e.value for e in PhysicsEngine], help="physics engine the USD is for")
     p.add_argument("--zero-pose", choices=[z.value for z in ZeroPose])
     base = p.add_mutually_exclusive_group()
     base.add_argument("--fixed-base", action="store_true", default=None)
@@ -41,6 +42,8 @@ def options_from_args(args: argparse.Namespace) -> ExportOptions:
     opts.output_path = args.output
     if args.name:
         opts.robot_name = args.name
+    if args.engine:
+        opts.physics_engine = PhysicsEngine(args.engine)
     if args.zero_pose:
         opts.zero_pose = ZeroPose(args.zero_pose)
     if args.fixed_base is not None:
@@ -65,7 +68,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s %(message)s")
     report = Exporter(options_from_args(args)).export(ModelFileSource(args.model))
     print(report.summary())
-    return 0
+    return 1 if report.errors else 0
 
 
 if __name__ == "__main__":

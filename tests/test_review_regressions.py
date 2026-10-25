@@ -10,7 +10,7 @@ from fusion2usd.core.math3d import Quat, Transform, Vec3
 from fusion2usd.core.report import ExportReport
 from fusion2usd.isaaclab.cfg_writer import IsaacLabCfgWriter
 from fusion2usd.kinematics import PassContext, default_pipeline
-from fusion2usd.options import ExportOptions, ZeroPose
+from fusion2usd.options import ExportOptions, PhysicsEngine, ZeroPose
 from fusion2usd.usd.builder import UsdRobotBuilder
 
 
@@ -91,4 +91,37 @@ def test_mimic_offset_in_degrees_for_revolute_follower():
     prim = stage.get("/gripper/joints/Revolute_2")
     # reversed follower: offset -> -0.1 rad; PhysX offset = -(that) in degrees
     assert prim.get("physxMimicJoint:rotX:offset").value == pytest.approx(math.degrees(0.1))
-    assert prim.get("newton:mimicCoef0").value == pytest.approx(-math.degrees(0.1))
+
+
+def test_newton_mimic_offset_in_degrees_for_revolute_follower():
+    m = gripper()
+    m.couplings[0].offset = 0.1  # rad
+    model, opts, report = process(m, physics_engine=PhysicsEngine.NEWTON)
+    stage = UsdRobotBuilder(opts, report).build(model)
+    # reversed follower: offset -> -0.1 rad; Newton coef0 is that, in degrees
+    assert stage.get("/gripper/joints/Revolute_2").get("newton:mimicCoef0").value == pytest.approx(-math.degrees(0.1))
+
+
+def test_mass_override_without_fusion_mass_gets_box_inertia():
+    from fusion2usd.kinematics import PropertiesPass
+    from _usd_models import box_mesh
+    m = four_bar()
+    ground = m.links["ground"]
+    ground.mass, ground.visuals = None, [box_mesh("v", size=0.2)]
+    ground.metadata["attributes"] = {"mass": "6 kg"}
+    report = ExportReport()
+    PropertiesPass().run(m, PassContext(ExportOptions(), report))
+    i = 6.0 / 12.0 * (0.2 ** 2 + 0.2 ** 2)
+    assert [ground.mass.inertia[k][k] for k in range(3)] == pytest.approx([i, i, i])
+
+
+def test_collision_override_is_validated():
+    from fusion2usd.kinematics import PropertiesPass
+    m = four_bar()
+    m.links["ground"].metadata["attributes"] = {"collision": "convex_hull"}
+    m.links["crank"].metadata["attributes"] = {"collision": "blob"}
+    report = ExportReport()
+    PropertiesPass().run(m, PassContext(ExportOptions(), report))
+    assert m.links["ground"].collision_approximation == "convexHull"
+    assert m.links["crank"].collision_approximation is None
+    assert any("unknown collision approximation 'blob'" in w for w in report.warnings)

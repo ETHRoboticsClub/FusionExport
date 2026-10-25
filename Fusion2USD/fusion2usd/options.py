@@ -8,6 +8,13 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 
+class PhysicsEngine(str, Enum):
+    """Simulator the USD is structured for. Both read standard UsdPhysics; they differ in joint support."""
+
+    PHYSX = "physx"    # Isaac Sim / Isaac Lab on PhysX: multi-DOF joints split into single-DOF chains
+    NEWTON = "newton"  # Newton (MuJoCo, Kamino, Featherstone, XPBD): native spherical and D6 joints
+
+
 class ZeroPose(str, Enum):
     FUSION = "fusion"    # USD joint position 0 == Fusion joint value 0; limits kept as in Fusion
     CURRENT = "current"  # the exported pose becomes joint position 0; limits are shifted
@@ -48,6 +55,7 @@ class DriveDefaults:
 class ExportOptions:
     robot_name: Optional[str] = None          # default: Fusion document name
     output_path: str = ""                     # .usda / .usd / .usdc
+    physics_engine: PhysicsEngine = PhysicsEngine.PHYSX
     zero_pose: ZeroPose = ZeroPose.FUSION
     fixed_base: Optional[bool] = None         # None: fixed iff something is grounded in Fusion
     base_link: Optional[str] = None           # Fusion occurrence/link name; None: auto
@@ -64,9 +72,8 @@ class ExportOptions:
     # kinematics
     probe_joints: bool = True                 # nudge each joint in Fusion to measure true axis/sign
     disconnected: DisconnectedPolicy = DisconnectedPolicy.FIX_TO_BASE
-    export_mimic_joints: bool = True          # Fusion motion links -> PhysxMimicJointAPI + NewtonMimicAPI
-    spherical_ball_joints: bool = False       # passive ball joints -> PhysicsSphericalJoint, no helper links
-    virtual_link_mass: float = 1e-3           # kg, for helper links of decomposed multi-DOF joints
+    export_mimic_joints: bool = True          # Fusion motion links -> PhysxMimicJointAPI / NewtonMimicAPI
+    virtual_link_mass: float = 1e-3           # kg, for helper links of decomposed multi-DOF joints (PhysX)
     virtual_link_inertia: float = 1e-6        # kg·m²
     min_mass: float = 1e-4
     min_inertia: float = 1e-9
