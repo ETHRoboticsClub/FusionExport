@@ -15,6 +15,8 @@ SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))
 
 @pytest.fixture
 def selftest():
+    # SelfTest purges and re-imports fusion2usd; restore the originals so later tests keep one set of classes.
+    saved = {k: v for k, v in sys.modules.items() if k == "fusion2usd" or k.startswith("fusion2usd.")}
     _adsk_stub.install()
     spec = importlib.util.spec_from_file_location("SelfTest", SCRIPT)
     module = importlib.util.module_from_spec(spec)
@@ -23,6 +25,9 @@ def selftest():
     yield module
     del sys.modules["SelfTest"]
     _adsk_stub.uninstall()
+    for k in [k for k in sys.modules if k == "fusion2usd" or k.startswith("fusion2usd.")]:
+        del sys.modules[k]
+    sys.modules.update(saved)
 
 
 def test_bar_corners_enclose_segment(selftest):
