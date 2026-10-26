@@ -25,10 +25,12 @@ def run(model, *passes, c=None):
 
 
 def test_four_bar_cuts_exactly_one_loop_and_orients_tree():
-    m, c = run(four_bar(), PropertiesPass(), NamingPass(), KinematicTreePass())
+    m, c = run(four_bar(), PropertiesPass(), NamingPass(), KinematicTreePass(), c=ctx(fixed_base=None))
     excluded = [j for j in m.joints if j.exclude_from_articulation]
     assert len(excluded) == 1
-    assert m.base_link == "ground" and m.fixed_base
+    assert m.base_link == "ground" and m.fixed_base  # auto: grounded in Fusion
+    floating, _ = run(four_bar(), PropertiesPass(), NamingPass(), KinematicTreePass())
+    assert not floating.fixed_base  # default
     # Every articulation joint's parent must be reachable before its child (tree order).
     seen = {"ground"}
     for j in sorted((j for j in m.joints if not j.exclude_from_articulation), key=lambda j: list(m.links).index(j.child)):

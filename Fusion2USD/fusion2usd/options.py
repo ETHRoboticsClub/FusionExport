@@ -57,7 +57,7 @@ class ExportOptions:
     output_path: str = ""                     # .usda / .usd / .usdc
     physics_engine: PhysicsEngine = PhysicsEngine.NEWTON
     zero_pose: ZeroPose = ZeroPose.FUSION
-    fixed_base: Optional[bool] = None         # None: fixed iff something is grounded in Fusion
+    fixed_base: Optional[bool] = False        # None: fixed iff something is grounded in Fusion
     base_link: Optional[str] = None           # Fusion occurrence/link name; None: auto
     source_up_axis: str = "auto"              # "auto" | "Y" | "Z"; output is always Z-up
 

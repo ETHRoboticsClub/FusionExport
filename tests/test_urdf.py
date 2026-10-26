@@ -52,7 +52,7 @@ def test_rpy_round_trip():
 @pytest.mark.parametrize("factory", [four_bar, gripper])
 @pytest.mark.parametrize("zero", [ZeroPose.FUSION, ZeroPose.CURRENT])
 def test_urdf_reproduces_export_pose(tmp_path, factory, zero):
-    opts = ExportOptions(zero_pose=zero)
+    opts = ExportOptions(zero_pose=zero, fixed_base=None)
     report = ExportReport()
     model = default_pipeline().run(factory(), PassContext(opts, report))
     path = tmp_path / "robot.urdf"

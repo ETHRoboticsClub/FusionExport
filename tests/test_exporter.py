@@ -45,7 +45,7 @@ def test_end_to_end_with_actions(tmp_path, factory):
     pxr = pytest.importorskip("pxr")
     from pxr import Usd, UsdPhysics
 
-    opts = ExportOptions(output_path=str(tmp_path / "out" / "robot.usda"), write_urdf=True)
+    opts = ExportOptions(output_path=str(tmp_path / "out" / "robot.usda"), write_urdf=True, fixed_base=None)
     report = Exporter(opts, actions=None).export(ModelFileSource(dump(factory(), tmp_path)))
     out = tmp_path / "out"
     assert (out / "robot.usda").exists() and (out / "robot_cfg.py").exists() and (out / "robot.urdf").exists()
