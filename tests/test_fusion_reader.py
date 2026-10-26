@@ -409,3 +409,39 @@ def test_rotation_values_wrap_into_the_limits(adsk):
     assert wrap_angle(math.radians(200), Limit(math.radians(-60), math.radians(210))) == pytest.approx(math.radians(200))
     assert wrap_angle(math.radians(200), None) == pytest.approx(math.radians(-160))
     assert wrap_angle(0.1, Limit(-1.0, 1.0)) == pytest.approx(0.1)
+
+
+def test_resolve_key_prefixes_from_the_assembly_context():
+    from fusion2usd.fusion.occurrences import resolve_key
+
+    known = {"hand_r:1+I-R:1+I-PP:1": 0, "hand_l:1+I-R:1+I-PP:1": 0, "hand_r:1+R-Carpals:1": 0}
+    assert resolve_key("I-R:1+I-PP:1", "hand_r:1+I-R:1", known) == "hand_r:1+I-R:1+I-PP:1"
+    assert resolve_key("I-R:1+I-PP:1", "hand_l:1+I-R:1", known) == "hand_l:1+I-R:1+I-PP:1"
+    assert resolve_key("R-Carpals:1", "hand_r:1", known) == "hand_r:1+R-Carpals:1"
+    assert resolve_key("R-Carpals:1", "", known) is None
+    assert resolve_key(None, "hand_r:1", known) is None
+
+
+def test_joint_inside_external_reference_is_kept(adsk):
+    """Fusion reports a referenced design's joint occurrences relative to that design."""
+    core = adsk["adsk.core"]
+    core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty
+    from fusion2usd.fusion.reader import FusionDesignReader
+
+    design, _ = build_design(adsk)
+    root = design.rootComponent
+    base, arm, wheel = root.occurrences
+    hand = Occurrence("hand:1", lambda: Transform())
+    hand.childOccurrences = Coll([wheel])
+    root.occurrences = Coll([base, arm, hand])
+    wheel.fullPathName = "hand:1+wheel:1"
+    rev2 = root.allJoints[1]
+    rev2.occurrenceOne = SimpleNamespace(fullPathName="wheel:1", transform2=Matrix(Transform()))
+    rev2.assemblyContext = SimpleNamespace(fullPathName="hand:1", name="hand:1")
+    report = ExportReport()
+    model = FusionDesignReader(design, ExportOptions(source_up_axis="Z"), report).read()
+
+    assert not any("unknown occurrence" in w for w in report.warnings)
+    j2 = model.joint("rev2")
+    assert j2.child == "wheel:1" and j2.parent == arm.name
+    assert j2.dofs[0].axis.is_close(Vec3(1, 0, 0), 1e-6)  # probed through the root-context proxy

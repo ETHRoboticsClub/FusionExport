@@ -49,6 +49,22 @@ class OccurrenceScanner:
         return {i.record.key: i for i in infos}
 
 
+def resolve_key(key: Optional[str], context: str, known: Dict[str, Any]) -> Optional[str]:
+    """Root-context path of ``key``, or None if it cannot be placed.
+
+    Joints and rigid groups inside an externally referenced design report occurrence paths relative to
+    that design ("I-R:1+I-PP:1") although their assembly context is a full path ("orca_right_joints:1+I-R:1").
+    The missing prefix is one of the context's ancestors."""
+    if key is None or key in known:
+        return key
+    parts = context.split("+") if context else []
+    for n in range(len(parts), 0, -1):
+        candidate = "+".join(parts[:n]) + "+" + key
+        if candidate in known:
+            return candidate
+    return None
+
+
 def find(infos: Dict[str, OccurrenceInfo], key: Optional[str]) -> Optional[Any]:
     info = infos.get(key) if key is not None else None
     return info.entity if info is not None else None

@@ -13,10 +13,10 @@ from ..options import ExportOptions
 from .couplings import MotionLinkReader
 from .geometry import MeshExtractor
 from .grouping import ROOT, Group, GroupingResult, JointEdge, PartGrouper
-from .joints import FusionJoint, JointBuilder, JointCollector
+from .joints import FusionJoint, JointBuilder, JointCollector, context_path
 from .mass import MassCalculator
 from .metadata import AttributeReader
-from .occurrences import OccurrenceInfo, OccurrenceScanner
+from .occurrences import OccurrenceInfo, OccurrenceScanner, resolve_key
 from .probe import JointProbe
 from .sensors import SensorReader
 from .units import items, transform_m
@@ -195,10 +195,17 @@ class FusionDesignReader:
     def _known_joints(self, joints: List[FusionJoint], by_key: Dict[str, OccurrenceInfo]) -> List[FusionJoint]:
         out = []
         for fj in joints:
-            unknown = [k for k in (fj.key_one, fj.key_two) if k is not None and k not in by_key]
+            one = resolve_key(fj.key_one, fj.context, by_key)
+            two = resolve_key(fj.key_two, fj.context, by_key)
+            unknown = [k for k, r in ((fj.key_one, one), (fj.key_two, two)) if k is not None and r is None]
             if unknown:
                 self._report.warn(f"joint {fj.name!r} references unknown occurrence(s) {unknown}; skipped")
                 continue
+            # Swap in the root-context proxies so keys, transforms and probing all live in the root frame.
+            if one != fj.key_one:
+                fj.occurrence_one = by_key[one].entity
+            if two != fj.key_two:
+                fj.occurrence_two = by_key[two].entity
             out.append(fj)
         return out
 
@@ -207,7 +214,15 @@ class FusionDesignReader:
         for rg in items(root.allRigidGroups):
             if rg.isSuppressed:
                 continue
-            groups.append([o.fullPathName for o in items(rg.occurrences) if o.fullPathName in by_key])
+            context = context_path(rg)
+            members = []
+            for o in items(rg.occurrences):
+                key = resolve_key(o.fullPathName, context, by_key)
+                if key is None:
+                    self._report.warn(f"rigid group {rg.name!r}: unknown occurrence {o.fullPathName!r}; ignored")
+                else:
+                    members.append(key)
+            groups.append(members)
         return groups
 
     def _document_name(self) -> str:
