@@ -63,6 +63,7 @@ def test_end_to_end_with_actions(tmp_path, factory):
         excluded = [p for p in joints if UsdPhysics.Joint(p).GetExcludeFromArticulationAttr().Get()]
         assert len(excluded) == 1
     assert report.outputs[0].endswith("robot.usda")
+    assert (out / "robot_report.txt").read_text().strip() == report.summary()
 
 
 def test_custom_and_failing_actions(tmp_path):

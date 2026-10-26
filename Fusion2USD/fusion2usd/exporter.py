@@ -98,6 +98,11 @@ class Exporter:
             f" {len(model.couplings)} mimic couplings; base: {model.base_link}"
             f" ({'fixed' if model.fixed_base else 'floating'})"
         )
+        # The dialog is the only other place the report shows up, and it is easy to lose.
+        log = os.path.splitext(opts.output_path)[0] + "_report.txt"
+        report.outputs.append(log)
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(report.summary() + "\n")
         return report
 
     def _run_actions(self, artifacts: ExportArtifacts) -> None:
