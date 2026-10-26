@@ -135,10 +135,11 @@ class FusionDesignReader:
             self._report.warn(f"joint {name!r} connects parts that are rigidly connected otherwise; dropped")
         movable = [fj for fj in fusion_joints if not fj.is_rigid and fj.name not in internal]
 
+        builder = LinkBuilder(self._design, self._options, self._report, by_key, root_bodies)
+        movable = self._drop_hidden_leaves(grouping, movable, builder, by_key)
         model = RobotModel(name=self._options.robot_name or self._document_name())
         model.metadata.update({"source": "Autodesk Fusion", "document": self._document_name(),
                                "source_up_axis": self._up_axis()})
-        builder = LinkBuilder(self._design, self._options, self._report, by_key, root_bodies)
         link_names = self._build_links(model, builder, grouping, movable)
         # Before probing, so sensors are read at the same pose as the links.
         link_of = self._link_resolver(grouping, link_names, by_key, model)
@@ -177,6 +178,37 @@ class FusionDesignReader:
             model.grounded_links = [names[g]]
             model.base_link = names[g]
         return names
+
+    def _drop_hidden_leaves(self, grouping: GroupingResult, movable: List[FusionJoint], builder: LinkBuilder,
+                            by_key: Dict[str, OccurrenceInfo]) -> List[FusionJoint]:
+        """A joint keeps a hidden part as a link, but with its bodies skipped that link would be empty and
+        massless. Drop such parts with their joint when nothing hangs off them; keep (and say so) otherwise."""
+        def hidden(idx: int) -> bool:
+            group = grouping.groups[idx]
+            return (idx != grouping.grounded_group and not builder.bodies(group)
+                    and any(by_key[k].hidden for k in group.members if k != ROOT))
+
+        def touching(idx: int) -> List[FusionJoint]:
+            return [fj for fj in movable if idx in (grouping.group_index(fj.key_one), grouping.group_index(fj.key_two))]
+
+        candidates = {i for i in range(len(grouping.groups)) if hidden(i)}
+        changed = True
+        while changed:
+            changed = False
+            for idx in sorted(candidates):
+                joints = touching(idx)
+                if len(joints) > 1:
+                    continue
+                if joints:  # without joints it never becomes a link anyway
+                    self._report.warn(f"part {grouping.groups[idx].anchor!r} is hidden; "
+                                      f"dropped it and joint {joints[0].name!r}")
+                    movable = [fj for fj in movable if fj is not joints[0]]
+                candidates.discard(idx)
+                changed = True
+        for idx in sorted(candidates):
+            self._report.warn(f"part {grouping.groups[idx].anchor!r} is hidden but connects other parts; "
+                              "exported without geometry or mass")
+        return movable
 
     @staticmethod
     def _link_resolver(grouping: GroupingResult, names: Dict[int, str], by_key: Dict[str, OccurrenceInfo],

@@ -297,10 +297,27 @@ def test_internal_joint_dropped_and_hidden_body_skipped(adsk):
     wheel.bRepBodies[0].isVisible = False
     report = ExportReport()
     model = FusionDesignReader(design, ExportOptions(source_up_axis="Y", probe_joints=False), report).read()
-    assert [j.name for j in model.joints] == ["rev2"]
+    assert model.joints == []
     assert any("rev1" in w and "dropped" in w for w in report.warnings)
-    assert model.links["wheel:1"].visuals == [] and model.links["wheel:1"].mass is None
-    assert model.couplings == []  # leader joint not exported
+    # The hidden wheel would be an empty, massless link: it goes, with the joint that held it.
+    assert "wheel:1" not in model.links
+    assert any("'wheel:1' is hidden; dropped it and joint 'rev2'" in w for w in report.warnings)
+    assert model.couplings == []  # linked joints not exported
+
+
+def test_hidden_part_inside_a_chain_is_kept(adsk):
+    core = adsk["adsk.core"]
+    core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty
+    from fusion2usd.fusion.reader import FusionDesignReader
+
+    design, _ = build_design(adsk)
+    base, arm, wheel = design.rootComponent.occurrences
+    arm.bRepBodies[0].isVisible = False
+    report = ExportReport()
+    model = FusionDesignReader(design, ExportOptions(source_up_axis="Y", probe_joints=False), report).read()
+    assert sorted(j.name for j in model.joints) == ["rev1", "rev2"]
+    assert model.links["arm:1"].mass is None and model.links["wheel:1"].mass is not None
+    assert any("'arm:1' is hidden but connects other parts" in w for w in report.warnings)
 
 
 def test_srgb_to_linear(adsk):

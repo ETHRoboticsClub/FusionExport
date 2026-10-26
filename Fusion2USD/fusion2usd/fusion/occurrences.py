@@ -14,6 +14,7 @@ class OccurrenceInfo:
     entity: Any                                     # root-context occurrence proxy
     record: OccurrenceRecord
     bodies: List[Any] = field(default_factory=list)  # exported bodies of this occurrence only
+    hidden: bool = False                            # has bodies, but all of them are hidden (and skipped)
 
 
 class OccurrenceScanner:
@@ -28,11 +29,12 @@ class OccurrenceScanner:
         while stack:
             occ, parent, depth = stack.pop()
             key = occ.fullPathName
-            bodies = self.bodies(occ.bRepBodies)
+            all_bodies = list(items(occ.bRepBodies))
+            bodies = self.bodies(all_bodies)
             out.append(OccurrenceInfo(occ, OccurrenceRecord(
                 key=key, parent=parent, depth=depth, has_bodies=bool(bodies),
                 grounded=bool(occ.isGrounded), ground_to_parent=bool(occ.isGroundToParent),
-            ), bodies))
+            ), bodies, hidden=bool(all_bodies) and not bodies))
             children = list(items(occ.childOccurrences))
             stack.extend((child, key, depth + 1) for child in reversed(children))
         return out
