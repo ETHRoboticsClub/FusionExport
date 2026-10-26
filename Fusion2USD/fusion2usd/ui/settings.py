@@ -19,13 +19,19 @@ def config_dir() -> str:
 
 
 class OptionsStore:
+    # Every export starts from the default mesh quality.
+    NOT_REMEMBERED = ("visual_quality", "collision_quality")
+
     def __init__(self, path: Optional[str] = None) -> None:
         self.path = path or os.path.join(config_dir(), "last_export_options.json")
 
     def load(self) -> ExportOptions:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
-                return ExportOptions.from_dict(json.load(f))
+                data = json.load(f)
+            for key in self.NOT_REMEMBERED:
+                data.pop(key, None)
+            return ExportOptions.from_dict(data)
         except (OSError, ValueError, TypeError):
             return ExportOptions()
 

@@ -88,3 +88,14 @@ def test_addin_creates_promoted_buttons_on_own_panel(ui):
 
     addin.stop()
     assert not panel.isValid and not any(c.isValid for c in controls)
+
+
+def test_mesh_quality_is_not_remembered(tmp_path):
+    from fusion2usd.options import ExportOptions, MeshQuality
+    from fusion2usd.ui.settings import OptionsStore
+
+    store = OptionsStore(str(tmp_path / "opts.json"))
+    store.save(ExportOptions(robot_name="V1", visual_quality=MeshQuality.HIGH, collision_quality=MeshQuality.HIGH))
+    loaded = store.load()
+    assert loaded.robot_name == "V1"
+    assert (loaded.visual_quality, loaded.collision_quality) == (MeshQuality.NORMAL, MeshQuality.LOW)
