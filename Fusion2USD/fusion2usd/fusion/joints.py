@@ -142,10 +142,19 @@ class FusionJoint:
     occurrence_one: Any    # moving side (child); None -> root
     occurrence_two: Any    # parent side
     frame: Optional[Transform]  # world joint frame (geometry two)
+    # Set for joints inside an external reference, whose proxy geometry Fusion does not fully place:
+    # the native joint (component space) and the transform from that space to the root.
+    native: Any = None
+    to_root: Optional[Transform] = None
 
     @property
     def motion(self) -> Any:
         return self.entity.jointMotion
+
+    @property
+    def axis_motion(self) -> Any:
+        """The motion whose axis vectors :attr:`to_root` maps into the root frame."""
+        return self.native.jointMotion if self.native is not None else self.entity.jointMotion
 
     @property
     def specs(self) -> Tuple[DofSpec, ...]:
@@ -203,6 +212,16 @@ class JointCollector:
         for j in items(self._root.allAsBuiltJoints):
             yield j, True
 
+    def place_in_root(self, fj: FusionJoint, to_root: Transform) -> None:
+        """Re-read the frame of a joint inside an external reference from its native joint."""
+        native = getattr(fj.entity, "nativeObject", None)
+        if native is None:
+            return
+        local = self._frame(native, fj.as_built)
+        if local is None:
+            return
+        fj.native, fj.to_root, fj.frame = native, to_root, to_root * local
+
     def _frame(self, entity: Any, as_built: bool) -> Optional[Transform]:
         try:
             if not as_built:
@@ -246,7 +265,7 @@ class JointBuilder:
 
     def build(self, fj: FusionJoint, parent: str, child: str) -> Joint:
         frame = fj.frame or self._fallback_frame(fj)
-        motion = fj.motion
+        motion = fj.axis_motion
         dofs = [self._dof(fj, spec, motion, frame) for spec in fj.specs]
         try:
             attrs = self._attributes.read(fj.entity)
@@ -268,6 +287,8 @@ class JointBuilder:
 
     def _dof(self, fj: FusionJoint, spec: DofSpec, motion: Any, frame: Transform) -> Dof:
         axis = optional_vec(getattr(motion, spec.axis_attr)) if spec.axis_attr else None
+        if axis is not None and fj.to_root is not None:
+            axis = fj.to_root.apply_vector(axis)
         if axis is None:
             axis = self._fallback_axis(spec, motion, frame)
         limit = self._limit(spec, getattr(motion, spec.limits_attr))

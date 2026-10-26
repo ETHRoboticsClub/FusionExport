@@ -121,7 +121,8 @@ class FusionDesignReader:
         infos = scanner.scan()
         by_key = OccurrenceScanner.by_key(infos)
         root_bodies = scanner.root_bodies()
-        fusion_joints = self._known_joints(JointCollector(root, self._report).collect(), by_key)
+        collector = JointCollector(root, self._report)
+        fusion_joints = self._known_joints(collector, collector.collect(), by_key)
 
         grouping = PartGrouper(
             [i.record for i in infos],
@@ -192,7 +193,8 @@ class FusionDesignReader:
             return names.get(grouping.group_index(None), model.base_link)
         return link_of
 
-    def _known_joints(self, joints: List[FusionJoint], by_key: Dict[str, OccurrenceInfo]) -> List[FusionJoint]:
+    def _known_joints(self, collector: JointCollector, joints: List[FusionJoint],
+                      by_key: Dict[str, OccurrenceInfo]) -> List[FusionJoint]:
         out = []
         for fj in joints:
             one = resolve_key(fj.key_one, fj.context, by_key)
@@ -201,11 +203,13 @@ class FusionDesignReader:
             if unknown:
                 self._report.warn(f"joint {fj.name!r} references unknown occurrence(s) {unknown}; skipped")
                 continue
-            # Swap in the root-context proxies so keys, transforms and probing all live in the root frame.
-            if one != fj.key_one:
-                fj.occurrence_one = by_key[one].entity
-            if two != fj.key_two:
-                fj.occurrence_two = by_key[two].entity
+            # Relative paths mean an external reference: swap in the root-context proxies, and re-place the
+            # frame, which misses nested placements too.
+            if (one, two) != (fj.key_one, fj.key_two):
+                fj.occurrence_one = by_key[one].entity if one is not None else None
+                fj.occurrence_two = by_key[two].entity if two is not None else None
+                if fj.context in by_key:
+                    collector.place_in_root(fj, transform_m(by_key[fj.context].entity.transform2))
             out.append(fj)
         return out
 

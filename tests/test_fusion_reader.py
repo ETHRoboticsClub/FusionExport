@@ -438,10 +438,21 @@ def test_joint_inside_external_reference_is_kept(adsk):
     rev2 = root.allJoints[1]
     rev2.occurrenceOne = SimpleNamespace(fullPathName="wheel:1", transform2=Matrix(Transform()))
     rev2.assemblyContext = SimpleNamespace(fullPathName="hand:1", name="hand:1")
+    # The proxy's geometry is useless; the native joint holds the frame in the hand's component space.
+    hand_pose = Transform(Quat.from_axis_angle(Vec3(0, 0, 1), math.pi / 2), Vec3(0.5, 0.0, 0.0))
+    hand._pose = lambda: hand_pose
+    rev2.geometryTwoTransform = Matrix(Transform(translation=Vec3(9, 9, 9)))
+    rev2.nativeObject = SimpleNamespace(
+        geometryTwoTransform=Matrix(hand_pose.inverse() * Transform(
+            Quat.from_axis_angle(Vec3(0, 1, 0), math.pi / 2), AXIS2_POINT)),
+        jointMotion=RevoluteMotion(adsk["adsk.fusion"].JointTypes.RevoluteJointType,
+                                   hand_pose.inverse().apply_vector(Vec3(1, 0, 0)), value=0.4))
     report = ExportReport()
-    model = FusionDesignReader(design, ExportOptions(source_up_axis="Z"), report).read()
+    opts = ExportOptions(source_up_axis="Z", probe_joints=False)
+    model = FusionDesignReader(design, opts, report).read()
 
     assert not any("unknown occurrence" in w for w in report.warnings)
     j2 = model.joint("rev2")
     assert j2.child == "wheel:1" and j2.parent == arm.name
-    assert j2.dofs[0].axis.is_close(Vec3(1, 0, 0), 1e-6)  # probed through the root-context proxy
+    assert j2.origin.is_close(AXIS2_POINT, 1e-9)
+    assert j2.dofs[0].axis.is_close(Vec3(1, 0, 0), 1e-9)
