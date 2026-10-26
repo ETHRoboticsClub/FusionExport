@@ -208,10 +208,24 @@ class FusionDesignReader:
             if (one, two) != (fj.key_one, fj.key_two):
                 fj.occurrence_one = by_key[one].entity if one is not None else None
                 fj.occurrence_two = by_key[two].entity if two is not None else None
-                if fj.context in by_key:
-                    collector.place_in_root(fj, transform_m(by_key[fj.context].entity.transform2))
+                to_root = self._native_to_root(fj, two, by_key)
+                if to_root is not None:
+                    collector.place_in_root(fj, to_root)
             out.append(fj)
         return out
+
+    @staticmethod
+    def _native_to_root(fj: FusionJoint, two: Optional[str],
+                        by_key: Dict[str, OccurrenceInfo]) -> Optional[Transform]:
+        """Maps the native joint's component space to the root. The frame rides on the parent part, so
+        anchor it there: the referenced design's own pose of that part need not match the assembly's."""
+        native = getattr(fj.entity, "nativeObject", None)
+        native_two = getattr(native, "occurrenceTwo", None) if native is not None else None
+        if native_two is not None and two is not None:
+            return transform_m(by_key[two].entity.transform2) * transform_m(native_two.transform2).inverse()
+        if fj.context in by_key:
+            return transform_m(by_key[fj.context].entity.transform2)
+        return None
 
     def _rigid_groups(self, root: Any, by_key: Dict[str, OccurrenceInfo]) -> List[List[str]]:
         groups = []

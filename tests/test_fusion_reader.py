@@ -438,15 +438,18 @@ def test_joint_inside_external_reference_is_kept(adsk):
     rev2 = root.allJoints[1]
     rev2.occurrenceOne = SimpleNamespace(fullPathName="wheel:1", transform2=Matrix(Transform()))
     rev2.assemblyContext = SimpleNamespace(fullPathName="hand:1", name="hand:1")
-    # The proxy's geometry is useless; the native joint holds the frame in the hand's component space.
-    hand_pose = Transform(Quat.from_axis_angle(Vec3(0, 0, 1), math.pi / 2), Vec3(0.5, 0.0, 0.0))
-    hand._pose = lambda: hand_pose
+    # The proxy's geometry is useless. The native joint holds the frame in the referenced design's space,
+    # where the parent part (arm) sits in a pose of its own, not the one it has in the assembly.
+    hand._pose = lambda: Transform(Quat.from_axis_angle(Vec3(0, 0, 1), math.pi / 2), Vec3(0.5, 0.0, 0.0))
     rev2.geometryTwoTransform = Matrix(Transform(translation=Vec3(9, 9, 9)))
+    arm_native = Transform(Quat.from_axis_angle(Vec3(1, 1, 0).normalized(), 0.7), Vec3(-0.2, 0.1, 0.3))
+    to_native = arm_native * ARM_POSE.inverse()
     rev2.nativeObject = SimpleNamespace(
-        geometryTwoTransform=Matrix(hand_pose.inverse() * Transform(
-            Quat.from_axis_angle(Vec3(0, 1, 0), math.pi / 2), AXIS2_POINT)),
+        geometryTwoTransform=Matrix(to_native * Transform(Quat.from_axis_angle(Vec3(0, 1, 0), math.pi / 2),
+                                                          AXIS2_POINT)),
+        occurrenceTwo=SimpleNamespace(transform2=Matrix(arm_native)),
         jointMotion=RevoluteMotion(adsk["adsk.fusion"].JointTypes.RevoluteJointType,
-                                   hand_pose.inverse().apply_vector(Vec3(1, 0, 0)), value=0.4))
+                                   to_native.apply_vector(Vec3(1, 0, 0)), value=0.4))
     report = ExportReport()
     opts = ExportOptions(source_up_axis="Z", probe_joints=False)
     model = FusionDesignReader(design, opts, report).read()
