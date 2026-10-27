@@ -11,7 +11,7 @@ import pytest
 import _adsk_stub
 from fusion2usd.core.math3d import Quat, Transform, Vec3
 from fusion2usd.core.report import ExportReport
-from fusion2usd.options import ExportOptions
+from fusion2usd.options import ExportOptions, MeshQuality
 
 
 @pytest.fixture
@@ -241,7 +241,12 @@ def test_reader_on_fake_design(adsk):
     lo, hi = arm.visuals[0].transformed(arm.transform).bounds()
     assert lo.is_close(Vec3(0.1, -0.02, 0.18), 1e-9) and hi.is_close(Vec3(0.3, 0.02, 0.22), 1e-9)
     assert arm.visuals[0].material == "Red" and model.materials["Red"].color == (1.0, 0.0, 0.0)
-    assert len(arm.collisions) == 1 and arm.collisions[0].material is None
+    assert arm.collisions == []  # default: the USD collision prims reference the visual meshes
+    assert any("Meshes: visual normal, collision same as visual, no triangle limit" in i for i in report.infos)
+    design, _ = build_design(adsk)
+    own = FusionDesignReader(design, ExportOptions(source_up_axis="Z", collision_quality=MeshQuality.LOW),
+                             ExportReport()).read()
+    assert len(own.links["arm:1"].collisions) == 1 and own.links["arm:1"].collisions[0].material is None
     assert arm.metadata["part_number"] == "PN-arm:1" and arm.metadata["material"] == "Steel"
 
     j1, j2 = model.joint("rev1"), model.joint("rev2")
@@ -476,3 +481,22 @@ def test_joint_inside_external_reference_is_kept(adsk):
     assert j2.child == "wheel:1" and j2.parent == arm.name
     assert j2.origin.is_close(AXIS2_POINT, 1e-9)
     assert j2.dofs[0].axis.is_close(Vec3(1, 0, 0), 1e-9)
+
+
+def test_coarsen_loosens_tolerances_until_under_budget(adsk):
+    from fusion2usd.fusion.geometry import MeshExtractor
+
+    class Calc:
+        surfaceTolerance, maxNormalDeviation = 0.01, 0.2
+
+        def calculate(self):  # triangle count falls with the tolerance
+            return SimpleNamespace(nodeIndices=[0] * 3 * int(100 / self.surfaceTolerance))
+
+    report = ExportReport()
+    calc = Calc()
+    tri = MeshExtractor(report)._coarsen(SimpleNamespace(name="torso"), calc, calc.calculate(), 2000)
+    assert len(tri.nodeIndices) // 3 == 1250 and calc.surfaceTolerance == pytest.approx(0.08)
+    assert report.infos == ["body 'torso': 10,000 -> 1,250 triangles (surface tolerance 0.8 mm, normal deviation 39 deg)"]
+
+    MeshExtractor(report)._coarsen(SimpleNamespace(name="thread"), Calc(), Calc().calculate(), 10)
+    assert "still over the 10 limit" in report.warnings[-1]

@@ -17,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("model", help="raw model JSON written by the Fusion add-in (write_model_json)")
     p.add_argument("-o", "--output", required=True, help="output .usda/.usd/.usdc")
     p.add_argument("--options", help="ExportOptions JSON (as saved by the add-in)")
+    p.add_argument("--mesh-layer", action="store_true", help="write meshes to a sublayer (.usdc when pxr is available)")
     p.add_argument("--name", help="robot name")
     p.add_argument("--engine", choices=[e.value for e in PhysicsEngine], help="physics engine the USD is for")
     p.add_argument("--zero-pose", choices=[z.value for z in ZeroPose])
@@ -40,6 +41,8 @@ def options_from_args(args: argparse.Namespace) -> ExportOptions:
     else:
         opts = ExportOptions()
     opts.output_path = args.output
+    if args.mesh_layer:
+        opts.mesh_layer = True
     if args.name:
         opts.robot_name = args.name
     if args.engine:

@@ -6,8 +6,10 @@ from typing import Any, List, Optional
 
 import adsk.core
 
+from .. import usd_support
 from .base import CommandBase
 from .export_command import ExportCommand
+from .install_command import InstallUsdCommand
 from .properties_command import JointPropertiesCommand, LinkPropertiesCommand, SensorPropertiesCommand
 
 WORKSPACE_ID = "FusionSolidEnvironment"
@@ -18,10 +20,11 @@ PANEL_NAME = "FUSION2USD"
 class AddIn:
     def __init__(self) -> None:
         self.commands: List[CommandBase] = [ExportCommand(), JointPropertiesCommand(), LinkPropertiesCommand(),
-                                           SensorPropertiesCommand()]
+                                           SensorPropertiesCommand(), InstallUsdCommand()]
         self._panel: Optional[Any] = None
 
     def start(self) -> None:
+        usd_support.activate()
         ui = adsk.core.Application.get().userInterface
         workspace = ui.workspaces.itemById(WORKSPACE_ID)
         if workspace is None:

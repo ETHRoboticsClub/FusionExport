@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import adsk.core
@@ -21,6 +22,8 @@ _QUALITY = {
 }
 
 Bounds = Tuple[Vec3, Vec3]
+_COARSEN_STEPS = 8
+_MAX_NORMAL_DEVIATION = math.radians(60)
 
 
 def _bounds(points: List[float]) -> Bounds:
@@ -114,11 +117,13 @@ class MeshExtractor:
         self.appearances = appearances or AppearanceReader()
 
     def mesh(self, body: Any, quality: MeshQuality, link_transform: Transform,
-             with_material: bool) -> Optional[Mesh]:
+             with_material: bool, max_triangles: int = 0) -> Optional[Mesh]:
         try:
             calc = body.meshManager.createMeshCalculator()
             calc.setQuality(_QUALITY[quality])
             tri = calc.calculate()
+            if max_triangles and tri is not None and len(tri.nodeIndices) // 3 > max_triangles:
+                tri = self._coarsen(body, calc, tri, max_triangles)
         except Exception as exc:
             self._report.warn(f"body {body.name!r}: tessellation failed ({exc})")
             return None
@@ -140,6 +145,29 @@ class MeshExtractor:
             mat = self.appearances.material_for(appearance)
             material = mat.name if mat is not None else None
         return Mesh(body.name, _apply(points_cm, to_link, CM), list(tri.nodeIndices), normals, material)
+
+    def _coarsen(self, body: Any, calc: Any, tri: Any, budget: int) -> Any:
+        """Loosen the tessellation tolerances until ``body`` fits in ``budget`` triangles."""
+        before = len(tri.nodeIndices) // 3
+        tol = calc.surfaceTolerance  # cm
+        if tol <= 0:
+            bb = body.boundingBox
+            tol = 1e-3 * (vec(bb.maxPoint) - vec(bb.minPoint)).norm()
+        dev = calc.maxNormalDeviation or math.radians(10)
+        for _ in range(_COARSEN_STEPS):
+            tol, dev = tol * 2, min(dev * 1.5, _MAX_NORMAL_DEVIATION)
+            calc.surfaceTolerance, calc.maxNormalDeviation = tol, dev
+            tri = calc.calculate()
+            if len(tri.nodeIndices) // 3 <= budget:
+                break
+        after = len(tri.nodeIndices) // 3
+        msg = (f"body {body.name!r}: {before:,} -> {after:,} triangles (surface tolerance {tol * 10:.3g} mm, "
+               f"normal deviation {math.degrees(dev):.0f} deg)")
+        if after > budget:
+            self._report.warn(msg + f"; still over the {budget:,} limit")
+        else:
+            self._report.info(msg)
+        return tri
 
     def _mesh_to_world(self, body: Any, points_cm: List[float]) -> Transform:
         """Transform taking tessellation coordinates (scaled to m) to world.

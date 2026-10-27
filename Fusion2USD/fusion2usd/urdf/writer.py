@@ -155,6 +155,7 @@ class UrdfWriter:
                           iyy=_fmt(i[1][1]), iyz=_fmt(i[1][2]), izz=_fmt(i[2][2]))
 
         written = []
+        files: Dict[int, str] = {}  # id(mesh) -> STL already written (collisions reuse visual files)
         collisions = link.collisions or link.visuals
         for kind, meshes in (("visual", link.visuals), ("collision", collisions)):
             if kind == "collision" and not self.options.export_collisions:
@@ -162,10 +163,12 @@ class UrdfWriter:
             for mesh in meshes:
                 if mesh.triangle_count == 0:
                     continue
-                file_name = f"{link.name}_{kind}_{mesh.name}.stl"
-                path = os.path.join(mesh_dir, file_name)
-                StlWriter.write(path, mesh, to_urdf)
-                written.append(path)
+                file_name = files.get(id(mesh))
+                if file_name is None:
+                    file_name = files[id(mesh)] = f"{link.name}_{kind}_{mesh.name}.stl"
+                    path = os.path.join(mesh_dir, file_name)
+                    StlWriter.write(path, mesh, to_urdf)
+                    written.append(path)
                 shape = ET.SubElement(el, kind, name=mesh.name)
                 geom = ET.SubElement(shape, "geometry")
                 ET.SubElement(geom, "mesh", filename=f"{mesh_rel}/{file_name}")

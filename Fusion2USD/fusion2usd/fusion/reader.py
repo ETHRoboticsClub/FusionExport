@@ -9,7 +9,7 @@ import adsk.core
 from ..core.math3d import Transform
 from ..core.report import ExportReport
 from ..model.robot import Joint, Link, Mesh, RobotModel
-from ..options import ExportOptions
+from ..options import ExportOptions, MeshQuality
 from .couplings import MotionLinkReader
 from .geometry import MeshExtractor
 from .grouping import ROOT, Group, GroupingResult, JointEdge, PartGrouper
@@ -79,10 +79,15 @@ class LinkBuilder:
 
     def _meshes(self, bodies: List[Any], link: Link, visual: bool) -> List[Mesh]:
         quality = self._options.visual_quality if visual else self._options.collision_quality
+        if quality is MeshQuality.VISUAL:
+            if self._options.export_visuals:
+                return []  # the collision prims reference the visual meshes
+            quality = self._options.visual_quality
         used: Set[str] = set()
         out = []
         for body in bodies:
-            mesh = self.meshes.mesh(body, quality, link.transform, with_material=visual)
+            mesh = self.meshes.mesh(body, quality, link.transform, with_material=visual,
+                                    max_triangles=self._options.max_triangles)
             if mesh is not None:
                 mesh.name = _unique(mesh.name or "body", used)
                 out.append(mesh)
@@ -161,6 +166,11 @@ class FusionDesignReader:
             fusion_joints, joints_by_name)
         self._report.info(f"Read {len(model.links)} link(s), {len(model.joints)} joint(s), "
                           f"{len(model.couplings)} motion link(s), {len(model.sensors)} sensor(s) from Fusion")
+        opts = self._options
+        collision = ("same as visual" if opts.collision_quality is MeshQuality.VISUAL
+                     else opts.collision_quality.value)
+        budget = f"{opts.max_triangles:,} triangles per body" if opts.max_triangles else "no triangle limit"
+        self._report.info(f"Meshes: visual {opts.visual_quality.value}, collision {collision}, {budget}")
         return model
 
     # -- steps

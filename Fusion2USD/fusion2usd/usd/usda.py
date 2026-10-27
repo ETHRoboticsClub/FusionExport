@@ -285,6 +285,7 @@ class Prim:
         self.specifier = specifier
         self.parent = parent
         self.api_schemas: List[str] = []
+        self.references: List[str] = []  # internal references (prim paths in this layer stack)
         self.metadata: Dict[str, Any] = {}
         self.custom_data: Dict[str, Any] = {}
         self.properties: Dict[str, Property] = {}
@@ -331,9 +332,12 @@ class Prim:
         meta: Dict[str, Any] = dict(self.metadata)
         if self.custom_data:
             meta["customData"] = self.custom_data
-        if self.api_schemas or meta:
+        if self.api_schemas or meta or self.references:
             out.append(head + " (")
             format_metadata_block(meta, indent + 1, out)
+            if self.references:
+                out.append(f"{pad}{_INDENT}prepend references = "
+                           + "[" + ", ".join(format_path(r) for r in self.references) + "]")
             if self.api_schemas:
                 out.append(f"{pad}{_INDENT}prepend apiSchemas = "
                            + "[" + ", ".join(quote(s) for s in self.api_schemas) + "]")
@@ -361,6 +365,7 @@ class UsdaStage:
         self.kilograms_per_unit = kilograms_per_unit
         self.doc = doc
         self.custom_layer_data: Dict[str, Any] = {}
+        self.sublayers: List[str] = []
         self.root_prims: Dict[str, Prim] = {}
 
     def define(self, name: str, type_name: str = "", specifier: str = "def") -> Prim:
@@ -381,6 +386,26 @@ class UsdaStage:
             prim = prim.child(name)
         return prim
 
+    def split_off(self, type_name: str) -> "UsdaStage":
+        """Move every prim of ``type_name`` (with its subtree) into a new layer meant to be sublayered.
+
+        The new layer holds their ancestors as typeless ``over`` prims, so it only adds to this layer."""
+        layer = UsdaStage(self.default_prim, self.up_axis, self.meters_per_unit, self.kilograms_per_unit)
+
+        def visit(prim: Prim, over: Callable[[], Prim]) -> None:
+            for name, child in list(prim.children.items()):
+                if child.type_name == type_name:
+                    del prim.children[name]
+                    target = over()
+                    child.parent = target
+                    target.children[name] = child
+                else:
+                    visit(child, _lazy(lambda c=child, o=over: o().child(c.name) or o().define(c.name, specifier="over")))
+
+        for name, root in self.root_prims.items():
+            visit(root, _lazy(lambda n=name: layer.root_prims.get(n) or layer.define(n, specifier="over")))
+        return layer
+
     def to_string(self) -> str:
         out: List[str] = ["#usda 1.0", "("]
         meta: Dict[str, Any] = {}
@@ -394,6 +419,8 @@ class UsdaStage:
         meta["metersPerUnit"] = _unit(self.meters_per_unit)
         meta["upAxis"] = self.up_axis
         format_metadata_block(meta, 1, out)
+        if self.sublayers:
+            out.append(_INDENT + "subLayers = [" + ", ".join(format_asset(p) for p in self.sublayers) + "]")
         out.append(")")
         for p in self.root_prims.values():
             out.append("")
@@ -404,6 +431,17 @@ class UsdaStage:
     def save(self, path: str) -> None:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(self.to_string())
+
+
+def _lazy(make: Callable[[], Prim]) -> Callable[[], Prim]:
+    """Create the prim on first use only, so branches without matches leave no empty overs."""
+    made: List[Prim] = []
+
+    def get() -> Prim:
+        if not made:
+            made.append(make())
+        return made[0]
+    return get
 
 
 def _unit(v: float) -> Any:

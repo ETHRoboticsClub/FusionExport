@@ -19,8 +19,8 @@ def config_dir() -> str:
 
 
 class OptionsStore:
-    # Every export starts from the default mesh quality.
-    NOT_REMEMBERED = ("visual_quality", "collision_quality")
+    # Every export starts from the default mesh settings.
+    NOT_REMEMBERED = ("visual_quality", "collision_quality", "max_triangles")
 
     def __init__(self, path: Optional[str] = None) -> None:
         self.path = path or os.path.join(config_dir(), "last_export_options.json")

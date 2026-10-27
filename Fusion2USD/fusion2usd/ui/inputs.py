@@ -22,6 +22,13 @@ def dropdown_value(inputs: Any, input_id: str, choices: Sequence[Choice]) -> str
     return next(v for lbl, v in choices if lbl == label)
 
 
+def select_dropdown(inputs: Any, input_id: str, choices: Sequence[Choice], value: str) -> None:
+    items = inputs.itemById(input_id).listItems
+    for i, (_, v) in enumerate(choices):
+        if v == value:
+            items.item(i).isSelected = True
+
+
 def string_value(inputs: Any, input_id: str) -> str:
     return inputs.itemById(input_id).value.strip()
 

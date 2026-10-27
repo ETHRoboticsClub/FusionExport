@@ -100,6 +100,7 @@ class _StageWriter:
         self.engine = engine
         self.newton = options.physics_engine is PhysicsEngine.NEWTON
         self.filtered: Dict[str, List[str]] = {}  # child link -> parent link paths
+        self.visual_paths: Dict[int, str] = {}  # id(mesh) -> written visual prim
 
     def write(self) -> None:
         for link in self.model.links.values():
@@ -151,7 +152,9 @@ class _StageWriter:
             scope = prim.define("visuals", "Xform")
             names = NameRegistry()
             for mesh in link.visuals:
-                self._write_mesh(scope, names.claim(mesh.name, "mesh"), mesh, visual=True)
+                m = self._write_mesh(scope, names.claim(mesh.name, "mesh"), mesh, visual=True)
+                if m is not None:
+                    self.visual_paths[id(mesh)] = m.path
         self._write_collisions(prim, link)
 
     def _write_collisions(self, prim: Prim, link: Link) -> None:
@@ -169,7 +172,13 @@ class _StageWriter:
         scope.attr("purpose", "uniform token", "guide")
         names = NameRegistry()
         for mesh in meshes:
-            m = self._write_mesh(scope, names.claim(mesh.name, "collision"), mesh, visual=False)
+            name = names.claim(mesh.name, "collision")
+            visual = self.visual_paths.get(id(mesh))
+            if visual is not None:  # reuse the visual geometry instead of storing it twice
+                m = scope.define(name, "Mesh")
+                m.references.append(visual)
+            else:
+                m = self._write_mesh(scope, name, mesh, visual=False)
             if m is None:
                 continue
             self.engine.collision(m, approx)

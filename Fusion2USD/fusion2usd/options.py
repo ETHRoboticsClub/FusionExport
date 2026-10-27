@@ -31,6 +31,7 @@ class CollisionApproximation(str, Enum):
 
 
 class MeshQuality(str, Enum):
+    VISUAL = "visual"  # collision only: reuse the visual meshes
     LOW = "low"
     NORMAL = "normal"
     HIGH = "high"
@@ -55,6 +56,7 @@ class DriveDefaults:
 class ExportOptions:
     robot_name: Optional[str] = None          # default: Fusion document name
     output_path: str = ""                     # .usda / .usd / .usdc
+    mesh_layer: bool = False                  # meshes in a sublayer next to it (.usdc when pxr is available)
     physics_engine: PhysicsEngine = PhysicsEngine.NEWTON
     zero_pose: ZeroPose = ZeroPose.FUSION
     fixed_base: Optional[bool] = False        # None: fixed iff something is grounded in Fusion
@@ -63,7 +65,8 @@ class ExportOptions:
 
     # geometry
     visual_quality: MeshQuality = MeshQuality.NORMAL
-    collision_quality: MeshQuality = MeshQuality.LOW
+    collision_quality: MeshQuality = MeshQuality.VISUAL
+    max_triangles: int = 0                    # per body; coarser tessellation above it (0: no limit)
     export_visuals: bool = True
     export_collisions: bool = True
     collision_approximation: CollisionApproximation = CollisionApproximation.CONVEX_DECOMPOSITION

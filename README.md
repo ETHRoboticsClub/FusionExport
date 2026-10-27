@@ -17,7 +17,22 @@ URDF.
    the **FUSION2USD** panel on the **UTILITIES** tab of the Design workspace.
 
 Fusion needs no third-party packages: the add-in writes `.usda` text itself. Binary `.usd`/`.usdc`
-output needs `usd-core` to be importable; without it the add-in writes `.usda` and says so.
+output needs `usd-core`, which Fusion does not ship: run **Install USD support** (in the FUSION2USD
+panel's menu) once to download it from PyPI into the add-in's config folder. Without it the add-in
+writes `.usda` and says so.
+
+**USD format** in the export dialog picks the output:
+
+| Format | Files |
+|---|---|
+| Text (.usda) | one `robot.usda` |
+| Binary (.usdc) | one `robot.usdc` |
+| Text, meshes in a binary layer | `robot.usda` with links, joints, physics and materials, sublayering `robot_meshes.usdc` with the meshes |
+
+Collision prims reference the visual meshes by default (**Collision mesh quality → Same as visual**), so
+the geometry is stored once and the simulator builds its hulls from it; pick a quality to export a
+separate, coarser collision mesh instead. **Max triangles per body** loosens Fusion's tessellation
+tolerances for bodies above the limit. The report lists the mesh settings and every coarsened body.
 
 ## Quick start
 

@@ -84,7 +84,9 @@ def test_addin_creates_promoted_buttons_on_own_panel(ui):
     panel = workspace.toolbarPanels.itemById(PANEL_ID)
     assert panel is not None and panel.name == "FUSION2USD"
     controls = list(panel.controls.items.values())
-    assert len(controls) == 4 and all(c.isPromoted and c.isPromotedByDefault for c in controls)
+    promoted = [c for c in controls if c.isPromoted and c.isPromotedByDefault]
+    assert len(controls) == 5 and len(promoted) == 4
+    assert panel.controls.itemById("fusion2usd_install_usd") not in promoted
 
     addin.stop()
     assert not panel.isValid and not any(c.isValid for c in controls)
@@ -98,4 +100,14 @@ def test_mesh_quality_is_not_remembered(tmp_path):
     store.save(ExportOptions(robot_name="V1", visual_quality=MeshQuality.HIGH, collision_quality=MeshQuality.HIGH))
     loaded = store.load()
     assert loaded.robot_name == "V1"
-    assert (loaded.visual_quality, loaded.collision_quality) == (MeshQuality.NORMAL, MeshQuality.LOW)
+    assert (loaded.visual_quality, loaded.collision_quality) == (MeshQuality.NORMAL, MeshQuality.VISUAL)
+
+
+def test_usd_format_sets_the_extension(ui):
+    from fusion2usd.ui.export_command import usd_format, with_format
+
+    assert with_format("/x/robot.usda", "usdc") == "/x/robot.usdc"
+    assert with_format("/x/robot.usd", "usdc") == "/x/robot.usd"
+    assert with_format("/x/robot.usdc", "layered") == "/x/robot.usda"
+    assert with_format("/x/robot", "usda") == "/x/robot.usda"
+    assert usd_format("/x/robot.usd", False) == "usdc" and usd_format("/x/robot.usda", True) == "layered"
