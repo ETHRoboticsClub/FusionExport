@@ -21,6 +21,11 @@ from .probe import JointProbe
 from .sensors import SensorReader
 from .units import items, transform_m
 
+# ROS frame names (REP 105, 120, 145). A link whose parts include a component with one of these names
+# takes that name, the earliest in this tuple winning; the link frame does not move.
+ROS_LINK_NAMES = ("base_link", "torso", "imu_link", "gaze", "l_sole", "r_sole", "l_ankle", "r_ankle",
+                  "l_wrist", "r_wrist", "l_gripper", "r_gripper")
+
 
 def _unique(name: str, used: Set[str]) -> str:
     candidate, n = name, 1
@@ -57,10 +62,18 @@ class LinkBuilder:
         the root component (which carries the document name, e.g. "(Unsaved)")."""
         return next((self._occ[k].entity for k in group.members if k != ROOT), None)
 
+    def _ros_member(self, group: Group):
+        by_name = {self._occ[k].entity.component.name: self._occ[k].entity for k in group.members if k != ROOT}
+        return next((by_name[n] for n in ROS_LINK_NAMES if n in by_name), None)
+
     def build(self, group: Group) -> Link:
         anchor = None if group.anchor == ROOT else self._occ[group.anchor].entity
-        identity = anchor or self._root_group_member(group)  # names the link; None: root bodies only
-        name = _unique(identity.name if identity is not None else "base", self._names)
+        ros = self._ros_member(group)
+        identity = ros or anchor or self._root_group_member(group)  # names the link; None: root bodies only
+        wanted = ros.component.name if ros is not None else (identity.name if identity is not None else "base")
+        name = _unique(wanted, self._names)
+        if ros is not None and name != wanted:
+            self._report.warn(f"Several links contain a {wanted!r} component; this one is named {name!r}")
         transform = Transform() if group.contains_root else transform_m(anchor.transform2)
         link = Link(name=name, transform=transform,
                     source=identity.fullPathName if identity is not None else (self._root.name or "base"),

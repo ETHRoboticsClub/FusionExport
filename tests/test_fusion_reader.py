@@ -420,6 +420,26 @@ def test_grounded_group_with_root_bodies_is_named_after_its_occurrence(adsk):
     assert sorted(m.name for m in base.visuals) == ["floor", "plate"]  # root bodies joined the base link
 
 
+def test_link_takes_the_ros_name_of_a_merged_part(adsk):
+    """A part named base_link merged into the grounded group names the link; the frame stays the anchor's."""
+    core = adsk["adsk.core"]
+    core.ColorProperty, core.FloatProperty = ColorProperty, FloatProperty
+    from fusion2usd.fusion.reader import FusionDesignReader
+
+    design, _ = build_design(adsk)
+    imu = Occurrence("imu_link:1", lambda: BASE_POSE,
+                     [Body("chip", Vec3(0, 0, 0.1), Vec3(0.01, 0.01, 0.11), 0.01, Vec3(0, 0, 0.1))], grounded=True)
+    named = Occurrence("base_link:1", lambda: BASE_POSE,
+                       [Body("shell", Vec3(-0.1, -0.1, 0.1), Vec3(0.1, 0.1, 0.12), 0.3, Vec3(0, 0, 0.11))],
+                       grounded=True)
+    design.rootComponent.occurrences.extend([imu, named])
+    model = FusionDesignReader(design, ExportOptions(probe_joints=False), ExportReport()).read()
+    assert "base:1" not in model.links and "imu_link" not in model.links
+    base = model.links["base_link"]
+    assert base.source == "base_link:1" and base.transform.is_close(BASE_POSE)
+    assert {j.parent for j in model.joints} == {"base_link", "arm:1"}
+
+
 def test_rotation_values_wrap_into_the_limits(adsk):
     """Fusion reports -0.01 rad as 6.27; left unwrapped, a rezeroed limit lands a full turn away."""
     from fusion2usd.fusion.joints import wrap_angle
