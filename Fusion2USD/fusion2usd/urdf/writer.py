@@ -218,12 +218,19 @@ class UrdfWriter:
 
     @staticmethod
     def _write_sensor_frame(robot: ET.Element, sensor: Sensor, frames: Dict[str, Transform]) -> None:
-        """Cameras, IMUs and named frames become massless fixed child links (the usual ROS pattern)."""
+        """Cameras, IMUs and named frames become massless fixed child links (the usual ROS pattern), named
+        after the sensor and mounted by ``<name>_joint`` without a trailing ``_link``: imu_link hangs off
+        imu_joint. A name a link already has gets ``_frame``."""
         if sensor.kind is SensorKind.CONTACT or sensor.link not in frames:
             return
-        name = f"{sensor.name}_frame"
+        links = {e.get("name") for e in robot.findall("link")}
+        name = sensor.name if sensor.name not in links else f"{sensor.name}_frame"
+        stem = name[:-len("_link")] if name.endswith("_link") else name
+        joint_name = f"{stem}_joint"
+        if joint_name in {e.get("name") for e in robot.findall("joint")}:
+            joint_name = f"{name}_joint"
         ET.SubElement(robot, "link", name=name)
-        joint = ET.SubElement(robot, "joint", name=f"{name}_joint", type="fixed")
+        joint = ET.SubElement(robot, "joint", name=joint_name, type="fixed")
         ET.SubElement(joint, "parent", link=sensor.link)
         ET.SubElement(joint, "child", link=name)
         _origin(joint, frames[sensor.link].inverse() * sensor.transform)

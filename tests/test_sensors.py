@@ -105,10 +105,16 @@ def test_isaaclab_sensors_factory(tmp_path):
 
 def test_urdf_sensor_frames_and_serialization(tmp_path):
     model, opts, report = process(with_sensors())
+    renamed = {"imu": "imu_link", "tool_tip": "slider"}  # slider is also a link: that frame gets _frame
+    for sensor in model.sensors:
+        sensor.name = renamed.get(sensor.name, sensor.name)
     UrdfWriter(opts, report).write(model, str(tmp_path / "g.urdf"))
     root = ET.parse(tmp_path / "g.urdf").getroot()
     names = {l.get("name") for l in root.findall("link")}
-    assert {"Front_Cam_frame", "imu_frame", "tool_tip_frame"} <= names and "tip_contact_frame" not in names
+    assert {"Front_Cam", "imu_link", "slider_frame"} <= names and "tip_contact" not in names
+    mounts = {j.get("name"): j.find("child").get("link") for j in root.findall("joint")}
+    assert mounts["imu_joint"] == "imu_link" and mounts["Front_Cam_joint"] == "Front_Cam"
+    assert mounts["slider_frame_joint"] == "slider_frame"
 
     raw = with_sensors()
     path = str(tmp_path / "m.json")
