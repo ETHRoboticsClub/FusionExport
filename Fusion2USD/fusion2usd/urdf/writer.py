@@ -81,6 +81,8 @@ class UrdfWriter:
         mesh_dir_name = os.path.splitext(os.path.basename(path))[0] + "_meshes"
         mesh_dir = os.path.join(os.path.dirname(os.path.abspath(path)), mesh_dir_name)
         os.makedirs(mesh_dir, exist_ok=True)
+        uri = self.options.urdf_mesh_uri.rstrip("/")
+        mesh_ref = f"{uri}/{mesh_dir_name}" if uri else mesh_dir_name
         written: List[str] = []
 
         joints = self._tree_joints(model)
@@ -99,7 +101,7 @@ class UrdfWriter:
             _origin(j, frames[model.base_link])
 
         for name in frames:
-            written += self._write_link(robot, model.links[name], frames[name], mesh_dir, mesh_dir_name)
+            written += self._write_link(robot, model.links[name], frames[name], mesh_dir, mesh_ref)
         for joint in joints:
             self._write_joint(robot, model, joint, frames)
         for sensor in model.sensors:

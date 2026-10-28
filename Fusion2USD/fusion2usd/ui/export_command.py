@@ -78,6 +78,8 @@ class ExportCommand(CommandBase):
                                    ", ".join(opts.post_actions))
         inputs.addStringValueInput("overrides", "Overrides JSON", opts.overrides_path or "")
         inputs.addBoolValueInput("browse_overrides", "Browse overrides…", False, "", False)
+        inputs.addStringValueInput("urdf_mesh_uri", "URDF mesh URI (package://pkg/urdf; empty: relative)",
+                                   opts.urdf_mesh_uri)
 
     def on_input_changed(self, changed: Any, inputs: Any) -> None:
         if changed.id == "browse_output":
@@ -131,6 +133,7 @@ class ExportCommand(CommandBase):
             setattr(opts, field, bool_value(inputs, input_id))
         opts.post_actions = [a.strip() for a in string_value(inputs, "post_actions").split(",") if a.strip()]
         opts.overrides_path = string_value(inputs, "overrides") or None
+        opts.urdf_mesh_uri = string_value(inputs, "urdf_mesh_uri")
         return opts
 
     def _pick_file(self, title: str, filter_: str, current: str, save: bool) -> str:

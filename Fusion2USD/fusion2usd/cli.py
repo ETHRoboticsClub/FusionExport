@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--overrides", help="per-joint/link overrides JSON")
     p.add_argument("--action", action="append", default=[],
                    help=f"post-export action (repeatable): {', '.join(registered_actions())} or module:Class")
+    p.add_argument("--urdf-mesh-uri", help="the URDF folder as meshes reference it, e.g. package://pkg/urdf")
     p.add_argument("--no-isaaclab-cfg", action="store_true")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
@@ -57,6 +58,8 @@ def options_from_args(args: argparse.Namespace) -> ExportOptions:
         opts.collision_approximation = CollisionApproximation(args.collision)
     if args.overrides:
         opts.overrides_path = args.overrides
+    if args.urdf_mesh_uri is not None:
+        opts.urdf_mesh_uri = args.urdf_mesh_uri
     if args.no_isaaclab_cfg:
         opts.write_isaaclab_cfg = False
     if "urdf" in args.action:

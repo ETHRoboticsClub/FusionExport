@@ -44,6 +44,18 @@ def urdf_fk(root, base, base_tf, q):
     return frames
 
 
+@pytest.mark.parametrize("uri,prefix", [("", "robot_meshes/"),
+                                        ("package://pkg/urdf/", "package://pkg/urdf/robot_meshes/")])
+def test_mesh_paths_follow_the_uri_option(tmp_path, uri, prefix):
+    opts = ExportOptions(urdf_mesh_uri=uri)
+    report = ExportReport()
+    model = default_pipeline().run(gripper(), PassContext(opts, report))
+    UrdfWriter(opts, report).write(model, str(tmp_path / "robot.urdf"))
+    files = [m.get("filename") for m in ET.parse(tmp_path / "robot.urdf").getroot().iter("mesh")]
+    assert files and all(f.startswith(prefix) for f in files)
+    assert all((tmp_path / "robot_meshes" / f.rsplit("/", 1)[1]).exists() for f in files)
+
+
 def test_rpy_round_trip():
     q = quat_from_rpy(0.3, -0.4, 1.2)
     assert quat_from_rpy(*rpy_from_quat(q)).angle_to(q) < 1e-6

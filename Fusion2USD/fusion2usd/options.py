@@ -93,6 +93,7 @@ class ExportOptions:
     # post-export actions (see fusion2usd.actions); the flags are shortcuts for built-in actions
     write_isaaclab_cfg: bool = True
     write_urdf: bool = False
+    urdf_mesh_uri: str = ""                   # the URDF folder as meshes reference it (package://pkg/urdf); "": relative
     post_actions: List[str] = field(default_factory=list)  # registered names or "pkg.module:Class"
 
     def action_names(self) -> List[str]:
