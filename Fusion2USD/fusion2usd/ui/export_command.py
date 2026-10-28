@@ -110,7 +110,7 @@ class ExportCommand(CommandBase):
         except Exception:
             self.message(f"Export failed:\n\n{traceback.format_exc()}")
             return
-        self.message(report.summary() or "Export finished.")
+        self.message(report.brief() or "Export finished.")
 
     def _options(self, inputs: Any) -> ExportOptions:
         opts = self.store.load()

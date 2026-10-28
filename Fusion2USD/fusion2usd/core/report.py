@@ -38,3 +38,20 @@ class ExportReport:
             lines.append(f"{len(self.errors)} error(s):")
             lines += [f"  - {e}" for e in self.errors]
         return "\n".join(lines)
+
+    def brief(self, shown: int = 5) -> str:
+        """A summary short enough for a message box, which cannot scroll; the full one is in the report file."""
+        lines = [f"Wrote: {self.outputs[0]}"] if self.outputs else []
+        if len(self.outputs) > 2:
+            lines.append(f"  and {len(self.outputs) - 2} other file(s)")
+        if self.infos:
+            lines.append(self.infos[-1])
+        for label, items in (("error", self.errors), ("warning", self.warnings)):
+            if items:
+                lines.append(f"{len(items)} {label}(s):")
+                lines += [f"  - {m}" for m in items[:shown]]
+                if len(items) > shown:
+                    lines.append(f"  ... {len(items) - shown} more")
+        if len(self.outputs) > 1:
+            lines.append(f"Full report: {self.outputs[-1]}")
+        return "\n".join(lines)

@@ -6,6 +6,7 @@ import pytest
 from _mechanisms import four_bar, gripper
 from fusion2usd.actions import ExportArtifacts, PostExportAction
 from fusion2usd.cli import main as cli_main
+from fusion2usd.core.report import ExportReport
 from fusion2usd.exporter import Exporter, ModelFileSource
 from fusion2usd.options import ExportOptions
 from fusion2usd.serialization import ModelSerializer
@@ -64,6 +65,16 @@ def test_end_to_end_with_actions(tmp_path, factory):
         assert len(excluded) == 1
     assert report.outputs[0].endswith("robot.usda")
     assert (out / "robot_report.txt").read_text().strip() == report.summary()
+    assert report.brief().splitlines()[-1] == f"Full report: {out / 'robot_report.txt'}"
+
+
+def test_brief_report_stays_short():
+    report = ExportReport(outputs=["robot.usda"] + [f"m{i}.stl" for i in range(300)] + ["robot_report.txt"],
+                          infos=["read", "5 links"], warnings=[f"w{i}" for i in range(100)])
+    lines = report.brief().splitlines()
+    assert len(lines) < 15
+    assert lines[:3] == ["Wrote: robot.usda", "  and 300 other file(s)", "5 links"]
+    assert "  ... 95 more" in lines and lines[-1] == "Full report: robot_report.txt"
 
 
 def test_custom_and_failing_actions(tmp_path):
