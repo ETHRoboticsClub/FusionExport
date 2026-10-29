@@ -104,8 +104,8 @@ class ModelSerializer:
         return {
             "name": l.name, "transform": _tf(l.transform), "mass": mass,
             "visuals": [self._mesh(m) for m in l.visuals], "collisions": [self._mesh(m) for m in l.collisions],
-            "collision_approximation": l.collision_approximation, "metadata": l.metadata,
-            "source": l.source, "is_virtual": l.is_virtual,
+            "collision_approximation": l.collision_approximation, "collision_separate": l.collision_separate,
+            "metadata": l.metadata, "source": l.source, "is_virtual": l.is_virtual,
         }
 
     @staticmethod
@@ -118,7 +118,8 @@ class ModelSerializer:
         return Link(
             name=d["name"], transform=_untf(d["transform"]) or Transform(), mass=mass,
             visuals=meshes("visuals"), collisions=meshes("collisions"),
-            collision_approximation=d.get("collision_approximation"), metadata=d.get("metadata", {}),
+            collision_approximation=d.get("collision_approximation"),
+            collision_separate=list(d.get("collision_separate", [])), metadata=d.get("metadata", {}),
             source=d.get("source", ""), is_virtual=d.get("is_virtual", False),
         )
 

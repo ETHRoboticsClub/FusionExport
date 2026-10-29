@@ -15,13 +15,14 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from ..collision import joint_neighbours, link_hull
 from ..core.math3d import Quat, Transform, Vec3
 from ..core.naming import NameRegistry
 from ..core.report import ExportReport
 from ..model.robot import (
     Coupling, Dof, DofType, Joint, JointKind, Link, Material, Mesh, RobotModel, Sensor, SensorKind,
 )
-from ..options import CollisionApproximation, ExportOptions, PhysicsEngine, ZeroPose
+from ..options import CollisionApproximation, CollisionGeometry, ExportOptions, PhysicsEngine, ZeroPose
 from .engines import EngineSchemas, engine_schemas
 from .plan import JOINTS, LOOKS, ROOT_JOINT, ExportPlan
 from .usda import Prim, UsdaStage
@@ -117,6 +118,7 @@ class _StageWriter:
         for sensor in self.model.sensors:
             self._write_sensor(sensor)
         self._filter_decomposed_chains()
+        self._filter_near_joints()
         for link, targets in self.filtered.items():
             prim = self.stage.get(self.plan.link_path(link))
             prim.apply("PhysicsFilteredPairsAPI")
@@ -171,6 +173,16 @@ class _StageWriter:
         scope = prim.define("collisions", "Xform")
         scope.attr("purpose", "uniform token", "guide")
         names = NameRegistry()
+        if self.options.collision_geometry is CollisionGeometry.LINK_HULL:
+            separate = set(link.collision_separate)
+            missing = separate - {m.name for m in meshes}
+            if missing:
+                self.report.warn(f"link {link.name!r}: collision_separate names no mesh {sorted(missing)}")
+            merged = [m for m in meshes if m.name not in separate]
+            meshes = [m for m in meshes if m.name in separate]
+            approx = CollisionApproximation.CONVEX_HULL.value
+            if merged:
+                self._write_link_hull(scope, names.claim("hull", "collision"), link, merged)
         for mesh in meshes:
             name = names.claim(mesh.name, "collision")
             visual = self.visual_paths.get(id(mesh))
@@ -182,6 +194,22 @@ class _StageWriter:
             if m is None:
                 continue
             self.engine.collision(m, approx)
+
+    def _write_link_hull(self, scope: Prim, name: str, link: Link, meshes: List[Mesh]) -> None:
+        try:
+            vertices, faces = link_hull([m.points[: m.vertex_count * 3] for m in meshes],
+                                        self.options.collision_hull_directions)
+        except ValueError as exc:
+            self.report.warn(f"link {link.name!r}: no convex hull ({exc}); its meshes collide one by one")
+            for mesh in meshes:
+                m = self._write_mesh(scope, f"{name}_{mesh.name}", mesh, visual=False)
+                if m is not None:
+                    self.engine.collision(m, CollisionApproximation.CONVEX_HULL.value)
+            return
+        hull = Mesh(name=name, points=[c for v in vertices for c in v], indices=[i for f in faces for i in f])
+        m = self._write_mesh(scope, name, hull, visual=False)
+        if m is not None:
+            self.engine.collision(m, CollisionApproximation.CONVEX_HULL.value)
 
     def _write_mesh(self, parent: Prim, name: str, mesh: Mesh, visual: bool) -> Optional[Prim]:
         if not mesh.vertex_count or not mesh.triangle_count:
@@ -256,6 +284,8 @@ class _StageWriter:
         if spherical:
             # No limits, so the frames only need to coincide at the export pose (like free D6 rotations).
             frame, motion = self._joint_frame(joint), Transform.identity()
+            # Armature and friction apply to each of the ball's three rotations.
+            self.engine.joint_dynamics(prim, joint.properties.armature, joint.properties.friction, None)
             prim.attr("physics:axis", "uniform token", "X")
             if any(d.limit is not None and d.limit.is_bounded for d in joint.dofs):
                 self.report.warn(f"joint {joint.name!r}: ball-joint limits are not exported (a spherical joint "
@@ -324,6 +354,16 @@ class _StageWriter:
         path = self.plan.link_path(a)
         if a != b and path not in targets:
             targets.append(path)
+
+    def _filter_near_joints(self) -> None:
+        """Links at most ``filter_joint_distance`` joints apart, loop-closing joints included, never collide."""
+        distance = int(self.options.filter_joint_distance)
+        if distance <= 1:
+            return  # each joint's own pair is filtered as it is written
+        edges = [(j.parent, j.child) for j in self.model.joints
+                 if j.parent in self.model.links and j.child in self.model.links]
+        for pair in sorted(tuple(sorted(p)) for p in joint_neighbours(edges, distance)):
+            self._filter(*pair)
 
     def _filter_decomposed_chains(self) -> None:
         """Bodies of one split multi-DOF joint (incl. helpers) must never collide with each other."""

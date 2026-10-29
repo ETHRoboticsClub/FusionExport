@@ -151,6 +151,7 @@ class Link:
     visuals: List[Mesh] = field(default_factory=list)
     collisions: List[Mesh] = field(default_factory=list)
     collision_approximation: Optional[str] = None  # overrides the export default
+    collision_separate: List[str] = field(default_factory=list)  # meshes kept out of a link hull
     metadata: Dict[str, Any] = field(default_factory=dict)
     source: str = ""          # CAD identity (e.g. Fusion occurrence path)
     is_virtual: bool = False  # massless helper link from joint decomposition
