@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
-from ..collision import joint_neighbours, link_hull
+from ..collision import fit_primitive, joint_neighbours, link_hull
 from ..core.math3d import Quat, Transform, Vec3
 from ..core.naming import NameRegistry
 from ..core.report import ExportReport
@@ -221,6 +221,9 @@ class _StageWriter:
 
     def _write_link_hull(self, scope: Prim, name: str, link: Link, meshes: List[Mesh]) -> None:
         clouds = [m.points[: m.vertex_count * 3] for m in meshes] + self._merged_into.get(link.name, [])
+        if link.collision_primitive:
+            self._write_primitive(scope, link.collision_primitive, link, clouds)
+            return
         try:
             vertices, faces = link_hull(clouds, self.options.collision_hull_directions)
         except ValueError as exc:
@@ -234,6 +237,26 @@ class _StageWriter:
         m = self._write_mesh(scope, name, hull, visual=False)
         if m is not None:
             self.engine.collision(m, CollisionApproximation.CONVEX_HULL.value)
+
+    def _write_primitive(self, scope: Prim, kind: str, link: Link, clouds: List[List[float]]) -> None:
+        """A covering box (``Cube`` of size 2, scaled) or capsule (along z) on the link's principal axes."""
+        fit = fit_primitive(kind, clouds, self.options.collision_hull_directions)
+        rot = Quat.from_matrix(fit["rotation"])
+        if kind == "box":
+            prim = scope.define("box", "Cube")
+            prim.attr("size", "double", 2.0)
+            scale = fit["half_extents"]
+        else:
+            prim = scope.define("capsule", "Capsule")
+            prim.attr("radius", "double", fit["radius"])
+            prim.attr("height", "double", 2.0 * fit["half_height"])
+            prim.attr("axis", "uniform token", "Z")
+            scale = (1.0, 1.0, 1.0)
+        prim.attr("xformOp:translate", "double3", tuple(fit["center"]))
+        prim.attr("xformOp:orient", "quatd", rot.canonical())
+        prim.attr("xformOp:scale", "double3", tuple(scale))
+        prim.attr("xformOpOrder", "uniform token[]", ["xformOp:translate", "xformOp:orient", "xformOp:scale"])
+        prim.apply("PhysicsCollisionAPI")
 
     def _write_mesh(self, parent: Prim, name: str, mesh: Mesh, visual: bool) -> Optional[Prim]:
         if not mesh.vertex_count or not mesh.triangle_count:

@@ -47,7 +47,7 @@ _JOINT_ALIASES: Dict[str, Tuple[str, ...]] = {
 }
 _JOINT_DIRECTIVES = ("name", "loop_closure", "enabled", "lower", "upper")
 _LINK_DIRECTIVES = ("name", "mass", "collision", "collision_approximation", "collision_separate", "collision_into",
-                    "base")
+                    "collision_primitive", "base")
 
 _TRUE = {"1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
@@ -243,6 +243,11 @@ class PropertiesPass(ModelPass):
         if separate:
             names = separate if isinstance(separate, (list, tuple)) else str(separate).split(",")
             link.collision_separate = [str(n).strip() for n in names if str(n).strip()]
+        primitive = str(raw.get("collision_primitive", "") or "").strip().lower()
+        if primitive in ("box", "capsule"):
+            link.collision_primitive = primitive
+        elif primitive:
+            ctx.report.warn(f"{where}: unknown collision_primitive {primitive!r} (box or capsule); the link keeps its hull")
         if str(raw.get("collision_into", "") or "").strip():
             link.collision_into = str(raw["collision_into"]).strip()
         if "base" in raw and parser.boolean(raw["base"], where) and not ctx.options.base_link:

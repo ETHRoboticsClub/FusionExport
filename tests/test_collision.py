@@ -124,9 +124,18 @@ def _collision_summary(path):
     stage = Usd.Stage.Open(str(path))
     colliders, pairs, balls = {}, set(), {}
     for p in stage.Traverse():
-        if p.HasAPI(UsdPhysics.CollisionAPI):
+        if p.HasAPI(UsdPhysics.CollisionAPI) and p.IsA(UsdGeom.Mesh):
             pts = sorted(tuple(round(c, 5) for c in v) for v in UsdGeom.Mesh(p).GetPointsAttr().Get())
             colliders[str(p.GetPath())] = (UsdPhysics.MeshCollisionAPI(p).GetApproximationAttr().Get(), pts)
+        elif p.HasAPI(UsdPhysics.CollisionAPI):  # a primitive: its corners or axis ends in the link frame
+            local = UsdGeom.Xformable(p).GetLocalTransformation()
+            if p.IsA(UsdGeom.Cube):
+                corners = [(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+            else:
+                h = UsdGeom.Capsule(p).GetHeightAttr().Get() / 2
+                corners = [(0, 0, -h), (0, 0, h), (UsdGeom.Capsule(p).GetRadiusAttr().Get(), 0, 0)]
+            pts = sorted(tuple(round(c, 5) for c in local.Transform(c)) for c in corners)
+            colliders[str(p.GetPath())] = ("convexHull", pts)
         if p.HasAPI(UsdPhysics.FilteredPairsAPI):
             pairs |= {frozenset((str(p.GetPath()), str(t)))
                       for t in UsdPhysics.FilteredPairsAPI(p).GetFilteredPairsRel().GetTargets()}
@@ -148,7 +157,8 @@ def test_rebake_of_a_layered_export_equals_a_link_hull_export(tmp_path, make):
 
     overrides = {"links": {"base": {"collision": "none"}, "link1": {"collision_separate": ["c"]},
                            "link2": {"collision_into": "link1"}, "rocker": {"collision_into": "ground"},
-                           "sleeve": {"collision_into": "arm"}},
+                           "sleeve": {"collision_into": "arm"}, "coupler": {"collision_primitive": "box"},
+                           "ball": {"collision_primitive": "capsule"}, "crank": {"collision_primitive": "capsule"}},
                  "joints": {"ball_joint": {"armature": 1e-4, "friction": 0.02}}}
     (tmp_path / "o.json").write_text(json.dumps(overrides))
 
@@ -193,3 +203,21 @@ def test_collision_into_folds_a_links_meshes_into_another_links_hull():
     corners = [link2.Transform(tuple(c * s for c in (x, y, z)))
                for s in (0.025,) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
     assert sum(any((p - c).GetLength() < 1e-5 for p in points) for c in corners) >= 4
+
+
+@pytest.mark.parametrize("kind", ["box", "capsule"])
+def test_fitted_primitive_contains_every_point(kind):
+    from fusion2usd.collision import fit_primitive
+
+    rng = random.Random(7)
+    cloud = [c for _ in range(2000) for c in (rng.gauss(0.3, 0.05), rng.gauss(-0.1, 0.02), rng.gauss(0.5, 0.15))]
+    fit = fit_primitive(kind, [cloud])
+    rot, ctr = fit["rotation"], fit["center"]
+    for i in range(0, len(cloud), 3):
+        d = [cloud[i + k] - ctr[k] for k in range(3)]
+        q = [sum(rot[r][k] * d[r] for r in range(3)) for k in range(3)]  # into the primitive frame
+        if kind == "box":
+            assert all(abs(q[k]) <= fit["half_extents"][k] + 1e-9 for k in range(3))
+        else:
+            z = max(-fit["half_height"], min(fit["half_height"], q[2]))
+            assert math.hypot(q[0], q[1], q[2] - z) <= fit["radius"] + 1e-9

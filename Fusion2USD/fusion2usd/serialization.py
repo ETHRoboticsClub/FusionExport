@@ -105,7 +105,7 @@ class ModelSerializer:
             "name": l.name, "transform": _tf(l.transform), "mass": mass,
             "visuals": [self._mesh(m) for m in l.visuals], "collisions": [self._mesh(m) for m in l.collisions],
             "collision_approximation": l.collision_approximation, "collision_separate": l.collision_separate,
-            "collision_into": l.collision_into,
+            "collision_into": l.collision_into, "collision_primitive": l.collision_primitive,
             "metadata": l.metadata, "source": l.source, "is_virtual": l.is_virtual,
         }
 
@@ -121,7 +121,7 @@ class ModelSerializer:
             visuals=meshes("visuals"), collisions=meshes("collisions"),
             collision_approximation=d.get("collision_approximation"),
             collision_separate=list(d.get("collision_separate", [])),
-            collision_into=d.get("collision_into"), metadata=d.get("metadata", {}),
+            collision_into=d.get("collision_into"), collision_primitive=d.get("collision_primitive"), metadata=d.get("metadata", {}),
             source=d.get("source", ""), is_virtual=d.get("is_virtual", False),
         )
 

@@ -137,4 +137,68 @@ def joint_neighbours(edges: Iterable[Tuple[str, str]], distance: int) -> Set[Fro
     return pairs
 
 
-__all__ = ["fibonacci_directions", "support_points", "convex_hull", "link_hull", "joint_neighbours"]
+def principal_axes(points: Sequence[Point]) -> Tuple[Point, List[Point]]:
+    """Centroid and the covariance's eigenvectors (Jacobi rotations), longest spread last, right-handed."""
+    n = float(len(points))
+    c = tuple(sum(p[k] for p in points) / n for k in range(3))
+    a = [[sum((p[i] - c[i]) * (p[j] - c[j]) for p in points) / n for j in range(3)] for i in range(3)]
+    v = [[1.0 if i == j else 0.0 for j in range(3)] for i in range(3)]
+    for _ in range(50):
+        i, j = max(((0, 1), (0, 2), (1, 2)), key=lambda ij: abs(a[ij[0]][ij[1]]))
+        if abs(a[i][j]) < 1e-15:
+            break
+        theta = 0.5 * math.atan2(2.0 * a[i][j], a[j][j] - a[i][i])
+        cs, sn = math.cos(theta), math.sin(theta)
+        for k in range(3):  # A <- A R, V <- V R
+            aki, akj = a[k][i], a[k][j]
+            a[k][i], a[k][j] = cs * aki - sn * akj, sn * aki + cs * akj
+            vki, vkj = v[k][i], v[k][j]
+            v[k][i], v[k][j] = cs * vki - sn * vkj, sn * vki + cs * vkj
+        for k in range(3):  # A <- R^T A
+            aik, ajk = a[i][k], a[j][k]
+            a[i][k], a[j][k] = cs * aik - sn * ajk, sn * aik + cs * ajk
+    order = sorted(range(3), key=lambda k: a[k][k])
+    axes = [(v[0][k], v[1][k], v[2][k]) for k in order]
+    if _dot(_cross(axes[0], axes[1]), axes[2]) < 0:
+        axes[0] = tuple(-x for x in axes[0])
+    return c, axes
+
+
+def fit_primitive(kind: str, clouds: Iterable[Sequence[float]], directions: int = 64) -> dict:
+    """The smallest box or capsule on the clouds' principal axes (of their link hull) that contains every point.
+
+    Returns ``center``, ``rotation`` (rows of the world-from-primitive matrix, its z the long axis) and, for a box,
+    ``half_extents``; for a capsule, ``radius`` and ``half_height`` (of its cylinder, along z)."""
+    clouds = [list(c) for c in clouds]
+    vertices, _ = link_hull(clouds, directions)
+    centre, axes = principal_axes(vertices)
+    pts = [(c[i] - centre[0], c[i + 1] - centre[1], c[i + 2] - centre[2]) for c in clouds for i in range(0, len(c), 3)]
+    local = [tuple(_dot(p, a) for a in axes) for p in pts]
+    rotation = tuple(tuple(axes[k][r] for k in range(3)) for r in range(3))  # columns: the axes
+
+    def world(q: Point) -> Point:
+        return tuple(centre[r] + sum(rotation[r][k] * q[k] for k in range(3)) for r in range(3))
+
+    if kind == "box":
+        lo = [min(q[k] for q in local) for k in range(3)]
+        hi = [max(q[k] for q in local) for k in range(3)]
+        mid = tuple((lo[k] + hi[k]) / 2.0 for k in range(3))
+        return {"kind": "box", "center": world(mid), "rotation": rotation,
+                "half_extents": tuple((hi[k] - lo[k]) / 2.0 for k in range(3))}
+    if kind != "capsule":
+        raise ValueError(f"unknown collision primitive {kind!r} (box or capsule)")
+    # The axis through the middle of the points' cross-section bounds, then the radius and the shortest segment.
+    mx = (min(q[0] for q in local) + max(q[0] for q in local)) / 2.0
+    my = (min(q[1] for q in local) + max(q[1] for q in local)) / 2.0
+    radial = [math.hypot(q[0] - mx, q[1] - my) for q in local]
+    r = max(radial)
+    top = max(q[2] - math.sqrt(max(r * r - d * d, 0.0)) for q, d in zip(local, radial))
+    bottom = min(q[2] + math.sqrt(max(r * r - d * d, 0.0)) for q, d in zip(local, radial))
+    if top < bottom:
+        top = bottom = (top + bottom) / 2.0
+    return {"kind": "capsule", "center": world((mx, my, (top + bottom) / 2.0)), "rotation": rotation,
+            "radius": r, "half_height": (top - bottom) / 2.0}
+
+
+__all__ = ["fibonacci_directions", "support_points", "convex_hull", "link_hull", "joint_neighbours",
+           "principal_axes", "fit_primitive"]

@@ -17,7 +17,7 @@ import argparse
 import sys
 from typing import Dict, List, Optional, Set
 
-from .collision import joint_neighbours, link_hull
+from .collision import fit_primitive, joint_neighbours, link_hull
 from .kinematics.properties import OverrideSet, _layered
 
 
@@ -46,6 +46,7 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
     world = {link.GetName(): UsdGeom.Xformable(link).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
              for link in links}
     plan = {}  # link -> (mode, separate names, collision_into target or None, colliders)
+    primitives: Dict[str, Optional[str]] = {}
     for link in links:
         defaults, globbed, exact = rules.for_link([_source(link), link.GetName()])
         raw = _layered(defaults, globbed, exact)
@@ -53,6 +54,7 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
         separate = raw.get("collision_separate") or []
         separate = set(separate if isinstance(separate, (list, tuple)) else str(separate).split(","))
         into = str(raw.get("collision_into", "") or "").strip() or None
+        primitives[link.GetName()] = str(raw.get("collision_primitive", "") or "").strip().lower() or None
         if into is not None and into not in by_name:
             raise ValueError(f"link {link.GetName()!r}: collision_into names no link {into!r}")
         scope = stage.GetPrimAtPath(link.GetPath().AppendChild("collisions"))
@@ -89,6 +91,26 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
             mesh_layer = next((spec_layer(c[3][0].GetPath()) for c in plan.values() if c[3]), root_layer)
             stage.SetEditTarget(Usd.EditTarget(mesh_layer))
             UsdGeom.Xform.Define(stage, scope_path).CreatePurposeAttr("guide")
+        if primitives.get(name):
+            fit = fit_primitive(primitives[name], clouds[name], hull_directions)
+            rows = fit["rotation"]
+            rot = Gf.Matrix3d(*[rows[c][r] for r in range(3) for c in range(3)]).ExtractRotation().GetQuat()
+            if fit["kind"] == "box":
+                prim = UsdGeom.Cube.Define(stage, scope_path.AppendChild("box"))
+                prim.CreateSizeAttr(2.0)
+                scale = Gf.Vec3d(*fit["half_extents"])
+            else:
+                prim = UsdGeom.Capsule.Define(stage, scope_path.AppendChild("capsule"))
+                prim.CreateRadiusAttr(fit["radius"])
+                prim.CreateHeightAttr(2.0 * fit["half_height"])
+                prim.CreateAxisAttr("Z")
+                scale = Gf.Vec3d(1.0, 1.0, 1.0)
+            prim.AddTranslateOp().Set(Gf.Vec3d(*fit["center"]))
+            prim.AddOrientOp(UsdGeom.XformOp.PrecisionDouble).Set(rot)
+            prim.AddScaleOp(UsdGeom.XformOp.PrecisionDouble).Set(scale)
+            UsdPhysics.CollisionAPI.Apply(prim.GetPrim())
+            report["hulls"].append(f"{name}: {fit['kind']}")
+            continue
         vertices, faces = link_hull(clouds[name], hull_directions)
         hull = UsdGeom.Mesh.Define(stage, scope_path.AppendChild("hull"))
         hull.CreatePointsAttr([Gf.Vec3f(*v) for v in vertices])
