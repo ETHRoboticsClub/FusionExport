@@ -146,7 +146,9 @@ def test_rebake_of_a_layered_export_equals_a_link_hull_export(tmp_path, make):
     from fusion2usd.rebake import rebake
     from fusion2usd.usd.writer import UsdWriter
 
-    overrides = {"links": {"base": {"collision": "none"}, "link1": {"collision_separate": ["c"]}},
+    overrides = {"links": {"base": {"collision": "none"}, "link1": {"collision_separate": ["c"]},
+                           "link2": {"collision_into": "link1"}, "rocker": {"collision_into": "ground"},
+                           "sleeve": {"collision_into": "arm"}},
                  "joints": {"ball_joint": {"armature": 1e-4, "friction": 0.02}}}
     (tmp_path / "o.json").write_text(json.dumps(overrides))
 
@@ -175,3 +177,19 @@ def test_rebake_of_a_layered_export_equals_a_link_hull_export(tmp_path, make):
         assert a[0][path][1] == pytest.approx(b[0][path][1], abs=1e-5)
     assert a[1] == b[1]
     assert a[2] == pytest.approx(b[2]) if a[2] else a[2] == b[2]
+
+
+def test_collision_into_folds_a_links_meshes_into_another_links_hull():
+    model = arm_model()
+    model.links["link2"].collision_into = "link1"
+    stage, _ = build(model, ExportOptions(physics_engine=PhysicsEngine.NEWTON,
+                                          collision_geometry=CollisionGeometry.LINK_HULL))
+    assert not stage.GetPrimAtPath("/Test_Arm/link2/collisions").IsValid()
+    hull = stage.GetPrimAtPath("/Test_Arm/link1/collisions/hull")
+    link1, link2 = (UsdGeom.Xformable(stage.GetPrimAtPath(f"/Test_Arm/{n}")).ComputeLocalToWorldTransform(0)
+                    for n in ("link1", "link2"))
+    points = [link1.Transform(p) for p in UsdGeom.Mesh(hull).GetPointsAttr().Get()]
+    # link2's cube corners (in world) are among the hull's vertices: its far end is now link1's hull.
+    corners = [link2.Transform(tuple(c * s for c in (x, y, z)))
+               for s in (0.025,) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+    assert sum(any((p - c).GetLength() < 1e-5 for p in points) for c in corners) >= 4

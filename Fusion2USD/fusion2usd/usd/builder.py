@@ -104,6 +104,7 @@ class _StageWriter:
         self.visual_paths: Dict[int, str] = {}  # id(mesh) -> written visual prim
 
     def write(self) -> None:
+        self._merged_into = self._collisions_into()
         for link in self.model.links.values():
             self._write_link(link)
         joints = self.root.define(JOINTS, "Scope")
@@ -168,8 +169,11 @@ class _StageWriter:
             return
         meshes = link.collisions or link.visuals
         meshes = [m for m in meshes if m.vertex_count and m.triangle_count]
-        if not meshes:
+        hull_only = self.options.collision_geometry is CollisionGeometry.LINK_HULL
+        if not meshes and not (hull_only and self._merged_into.get(link.name)):
             return
+        if hull_only and link.name in self._merged_from:
+            return  # its meshes are in another link's hull
         scope = prim.define("collisions", "Xform")
         scope.attr("purpose", "uniform token", "guide")
         names = NameRegistry()
@@ -181,7 +185,7 @@ class _StageWriter:
             merged = [m for m in meshes if m.name not in separate]
             meshes = [m for m in meshes if m.name in separate]
             approx = CollisionApproximation.CONVEX_HULL.value
-            if merged:
+            if merged or self._merged_into.get(link.name):
                 self._write_link_hull(scope, names.claim("hull", "collision"), link, merged)
         for mesh in meshes:
             name = names.claim(mesh.name, "collision")
@@ -195,10 +199,30 @@ class _StageWriter:
                 continue
             self.engine.collision(m, approx)
 
+    def _collisions_into(self) -> Dict[str, List[List[float]]]:
+        """``collision_into``: per receiving link, the other links' collision points in its frame (export pose)."""
+        self._merged_from = set()
+        if self.options.collision_geometry is not CollisionGeometry.LINK_HULL:
+            return {}
+        out: Dict[str, List[List[float]]] = {}
+        for link in self.model.links.values():
+            target = self.model.links.get(link.collision_into) if link.collision_into else None
+            if link.collision_into and target is None:
+                self.report.warn(f"link {link.name!r}: collision_into names no link {link.collision_into!r}")
+            if target is None or target is link:
+                continue
+            to_target = target.transform.inverse() * link.transform
+            for mesh in link.collisions or link.visuals:
+                pts = mesh.points[: mesh.vertex_count * 3]
+                moved = [to_target.apply_point(Vec3(*pts[i:i + 3])) for i in range(0, len(pts), 3)]
+                out.setdefault(target.name, []).append([c for v in moved for c in v.as_tuple()])
+            self._merged_from.add(link.name)
+        return out
+
     def _write_link_hull(self, scope: Prim, name: str, link: Link, meshes: List[Mesh]) -> None:
+        clouds = [m.points[: m.vertex_count * 3] for m in meshes] + self._merged_into.get(link.name, [])
         try:
-            vertices, faces = link_hull([m.points[: m.vertex_count * 3] for m in meshes],
-                                        self.options.collision_hull_directions)
+            vertices, faces = link_hull(clouds, self.options.collision_hull_directions)
         except ValueError as exc:
             self.report.warn(f"link {link.name!r}: no convex hull ({exc}); its meshes collide one by one")
             for mesh in meshes:

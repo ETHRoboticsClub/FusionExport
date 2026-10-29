@@ -3,9 +3,9 @@
 ``python -m fusion2usd.rebake robot.usda --overrides overrides.json --filter-joint-distance 2``
 
 Rewrites what the export options ``collision_geometry: link_hull``, ``filter_joint_distance`` and the overrides'
-``collision``/``collision_separate`` link keys and ``armature``/``friction`` joint keys would have written, and
-nothing else: one convex hull per link (``fusion2usd.collision.link_hull``, in the link frame) in place of its
-per-mesh colliders, filtered pairs for links up to that many joints apart, and the ball joints' dynamics. The same
+``collision``/``collision_separate``/``collision_into`` link keys and ``armature``/``friction`` joint keys
+would have written, and nothing else: one convex hull per link (``fusion2usd.collision.link_hull``, in the
+link frame) in place of its per-mesh colliders, filtered pairs for links up to that many joints apart, and the ball joints' dynamics. The same
 functions run inside a Fusion export, so a re-export with those options gives the same colliders and filters.
 Needs ``usd-core`` (pxr). Edits are made in the layer that already holds each spec (meshes in a layered export's
 mesh layer, physics in the root layer); the files are saved in place.
@@ -32,7 +32,8 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
     stage = Usd.Stage.Open(path)
     rules = OverrideSet.load(overrides)
     root_layer = stage.GetRootLayer()
-    report: Dict[str, List[str]] = {"hulls": [], "no_collision": [], "separate": [], "filtered": [], "joints": []}
+    report: Dict[str, List[str]] = {"hulls": [], "merged_into": [], "no_collision": [], "separate": [],
+                                    "filtered": [], "joints": []}
     links = [p for p in stage.Traverse() if p.HasAPI(UsdPhysics.RigidBodyAPI)]
 
     def spec_layer(prim_path: Sdf.Path) -> Sdf.Layer:
@@ -41,39 +42,55 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
                 return layer
         return root_layer
 
+    by_name = {link.GetName(): link for link in links}
+    world = {link.GetName(): UsdGeom.Xformable(link).ComputeLocalToWorldTransform(Usd.TimeCode.Default())
+             for link in links}
+    plan = {}  # link -> (mode, separate names, collision_into target or None, colliders)
     for link in links:
         defaults, globbed, exact = rules.for_link([_source(link), link.GetName()])
         raw = _layered(defaults, globbed, exact)
         mode = str(raw.get("collision", raw.get("collision_approximation", "")) or "").replace("_", "").lower()
         separate = raw.get("collision_separate") or []
         separate = set(separate if isinstance(separate, (list, tuple)) else str(separate).split(","))
+        into = str(raw.get("collision_into", "") or "").strip() or None
+        if into is not None and into not in by_name:
+            raise ValueError(f"link {link.GetName()!r}: collision_into names no link {into!r}")
         scope = stage.GetPrimAtPath(link.GetPath().AppendChild("collisions"))
-        if not scope:
-            continue
-        colliders = [p for p in scope.GetChildren() if p.HasAPI(UsdPhysics.CollisionAPI)]
-        if not colliders:
-            continue
-        layer = spec_layer(colliders[0].GetPath())
-        stage.SetEditTarget(Usd.EditTarget(layer))
-        if mode == "none":
-            for p in colliders:
-                stage.RemovePrim(p.GetPath())
-            report["no_collision"].append(link.GetName())
-            continue
-        frame = UsdGeom.Xformable(link).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).GetInverse()
-        clouds = []
+        colliders = [p for p in scope.GetChildren() if p.HasAPI(UsdPhysics.CollisionAPI)] if scope else []
+        plan[link.GetName()] = (mode, separate, into, colliders)
+
+    def cloud(prim, frame_of: str) -> List[float]:
+        to_link = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()) \
+            * world[frame_of].GetInverse()
+        return [c for v in UsdGeom.Mesh(prim).GetPointsAttr().Get() for c in to_link.Transform(Gf.Vec3d(v))]
+
+    clouds: Dict[str, List[List[float]]] = {}
+    for name, (mode, separate, into, colliders) in plan.items():
+        if into is not None and into != name:
+            clouds.setdefault(into, []).extend(cloud(p, into) for p in colliders)
+            report["merged_into"].append(f"{name} -> {into}")
+        elif mode != "none":
+            clouds.setdefault(name, []).extend(cloud(p, name) for p in colliders if p.GetName() not in separate)
+    for name, (mode, separate, into, colliders) in plan.items():
+        if colliders:
+            stage.SetEditTarget(Usd.EditTarget(spec_layer(colliders[0].GetPath())))
         for p in colliders:
-            if p.GetName() in separate:
+            if into is None and mode != "none" and p.GetName() in separate:
                 UsdPhysics.MeshCollisionAPI.Apply(p).CreateApproximationAttr("convexHull")
-                report["separate"].append(f"{link.GetName()}/{p.GetName()}")
-                continue
-            to_link = UsdGeom.Xformable(p).ComputeLocalToWorldTransform(Usd.TimeCode.Default()) * frame
-            clouds.append([c for v in UsdGeom.Mesh(p).GetPointsAttr().Get() for c in to_link.Transform(Gf.Vec3d(v))])
-            stage.RemovePrim(p.GetPath())
-        if not clouds:
+                report["separate"].append(f"{name}/{p.GetName()}")
+            else:
+                stage.RemovePrim(p.GetPath())
+        if mode == "none" and into is None and colliders:
+            report["no_collision"].append(name)
+        if not clouds.get(name):
             continue
-        vertices, faces = link_hull(clouds, hull_directions)
-        hull = UsdGeom.Mesh.Define(stage, scope.GetPath().AppendChild("hull"))
+        scope_path = by_name[name].GetPath().AppendChild("collisions")
+        if not colliders:  # a link receiving others' meshes only: write where its colliders would be
+            mesh_layer = next((spec_layer(c[3][0].GetPath()) for c in plan.values() if c[3]), root_layer)
+            stage.SetEditTarget(Usd.EditTarget(mesh_layer))
+            UsdGeom.Xform.Define(stage, scope_path).CreatePurposeAttr("guide")
+        vertices, faces = link_hull(clouds[name], hull_directions)
+        hull = UsdGeom.Mesh.Define(stage, scope_path.AppendChild("hull"))
         hull.CreatePointsAttr([Gf.Vec3f(*v) for v in vertices])
         hull.CreateFaceVertexCountsAttr([3] * len(faces))
         hull.CreateFaceVertexIndicesAttr([i for f in faces for i in f])
@@ -83,7 +100,7 @@ def rebake(path: str, overrides: Optional[str], filter_joint_distance: int, hull
         hull.CreateSubdivisionSchemeAttr("none")
         UsdPhysics.CollisionAPI.Apply(hull.GetPrim())
         UsdPhysics.MeshCollisionAPI.Apply(hull.GetPrim()).CreateApproximationAttr("convexHull")
-        report["hulls"].append(f"{link.GetName()}: {len(vertices)} vertices from {len(clouds)} meshes")
+        report["hulls"].append(f"{name}: {len(vertices)} vertices from {len(clouds[name])} meshes")
 
     stage.SetEditTarget(Usd.EditTarget(root_layer))
     joints = [p for p in stage.Traverse() if p.IsA(UsdPhysics.Joint)]

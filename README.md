@@ -42,7 +42,8 @@ gives each link a single convex hull over all its collision meshes, computed dur
 evenly spread directions, so it lies within the exact hull, within about 2.5 % of the link's size,
 and has at most 64 vertices, the default cap of Newton and PhysX. A link's `collision_separate`
 meshes stay colliders of their own (for example a foot's sole plate), and `collision: none` drops a
-link's colliders (for example a linkage's rods).
+link's colliders (for example a linkage's rods). A link's `collision_into: <link>` folds its meshes into that link's hull at
+the exported pose and gives it no collider (for example fingers into the palm).
 
 **No collisions within this many joints** (`filter_joint_distance`) writes a filtered pair for every two
 links at most that many joints apart, loop-closing joints included. The default, 1, filters each
@@ -175,7 +176,7 @@ Properties come from three sources, in increasing priority:
 `damping` (`kd`), `armature`, `friction`, `actuated`, `drive_type`, `target`, `lower`, `upper`, `name`,
 `loop_closure`, `enabled`. `armature` and `friction` also apply to ball joints (each of their three rotations).
 
-**Link keys:** `name`, `mass`, `collision`, `collision_separate` (mesh names kept out of a link hull), `base`. A `mass` on a body that Fusion gave no mass gets the
+**Link keys:** `name`, `mass`, `collision`, `collision_separate` (mesh names kept out of a link hull), `collision_into` (a link whose hull takes this link's meshes), `base`. A `mass` on a body that Fusion gave no mass gets the
 inertia of a solid box over its meshes. `collision` accepts the approximation names in any case and
 with separators (`convex_hull`).
 

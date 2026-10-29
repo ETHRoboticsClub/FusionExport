@@ -46,7 +46,8 @@ _JOINT_ALIASES: Dict[str, Tuple[str, ...]] = {
     "target": ("target", "target_position"),
 }
 _JOINT_DIRECTIVES = ("name", "loop_closure", "enabled", "lower", "upper")
-_LINK_DIRECTIVES = ("name", "mass", "collision", "collision_approximation", "collision_separate", "base")
+_LINK_DIRECTIVES = ("name", "mass", "collision", "collision_approximation", "collision_separate", "collision_into",
+                    "base")
 
 _TRUE = {"1", "true", "yes", "on", "y"}
 _FALSE = {"0", "false", "no", "off", "n"}
@@ -242,6 +243,8 @@ class PropertiesPass(ModelPass):
         if separate:
             names = separate if isinstance(separate, (list, tuple)) else str(separate).split(",")
             link.collision_separate = [str(n).strip() for n in names if str(n).strip()]
+        if str(raw.get("collision_into", "") or "").strip():
+            link.collision_into = str(raw["collision_into"]).strip()
         if "base" in raw and parser.boolean(raw["base"], where) and not ctx.options.base_link:
             model.base_link = link.name
 
