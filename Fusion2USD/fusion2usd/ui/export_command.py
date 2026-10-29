@@ -9,7 +9,7 @@ from typing import Any
 import adsk.core
 import adsk.fusion
 
-from ..options import CollisionApproximation, ExportOptions, MeshQuality, PhysicsEngine, ZeroPose
+from ..options import CollisionApproximation, CollisionGeometry, ExportOptions, MeshQuality, PhysicsEngine, ZeroPose
 from .base import CommandBase
 from .inputs import add_dropdown, bool_value, dropdown_value, select_dropdown, string_value
 from .settings import OptionsStore
@@ -22,6 +22,8 @@ QUALITY = [("Low", MeshQuality.LOW.value), ("Normal", MeshQuality.NORMAL.value),
            ("High", MeshQuality.HIGH.value), ("Very high", MeshQuality.VERY_HIGH.value)]
 COLLISION_QUALITY = [("Same as visual (no extra copy)", MeshQuality.VISUAL.value)] + QUALITY
 APPROX = [(a.value, a.value) for a in CollisionApproximation]
+GEOMETRY = [("One collider per mesh", CollisionGeometry.PER_MESH.value),
+            ("One convex hull per link", CollisionGeometry.LINK_HULL.value)]
 FORMAT = [("Text (.usda)", "usda"), ("Binary (.usdc)", "usdc"), ("Text, meshes in a binary layer", "layered")]
 
 _FLAGS = (  # (input id, ExportOptions field, label)
@@ -72,6 +74,9 @@ class ExportCommand(CommandBase):
                                              1000, opts.max_triangles)
         add_dropdown(inputs, "collision_approx", "Collision approximation", APPROX,
                      opts.collision_approximation.value)
+        add_dropdown(inputs, "collision_geometry", "Collision geometry", GEOMETRY, opts.collision_geometry.value)
+        inputs.addIntegerSpinnerCommandInput("filter_joint_distance", "No collisions within this many joints", 1, 10,
+                                             1, opts.filter_joint_distance)
         for input_id, field, label in _FLAGS:
             inputs.addBoolValueInput(input_id, label, True, "", bool(getattr(opts, field)))
         inputs.addStringValueInput("post_actions", "Extra post-export actions (comma-separated)",
@@ -129,6 +134,8 @@ class ExportCommand(CommandBase):
         opts.collision_quality = MeshQuality(dropdown_value(inputs, "collision_quality", COLLISION_QUALITY))
         opts.max_triangles = int(inputs.itemById("max_triangles").value)
         opts.collision_approximation = CollisionApproximation(dropdown_value(inputs, "collision_approx", APPROX))
+        opts.collision_geometry = CollisionGeometry(dropdown_value(inputs, "collision_geometry", GEOMETRY))
+        opts.filter_joint_distance = int(inputs.itemById("filter_joint_distance").value)
         for input_id, field, _ in _FLAGS:
             setattr(opts, field, bool_value(inputs, input_id))
         opts.post_actions = [a.strip() for a in string_value(inputs, "post_actions").split(",") if a.strip()]

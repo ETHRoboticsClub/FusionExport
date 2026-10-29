@@ -34,6 +34,29 @@ the geometry is stored once and the simulator builds its hulls from it; pick a q
 separate, coarser collision mesh instead. **Max triangles per body** loosens Fusion's tessellation
 tolerances for bodies above the limit. The report lists the mesh settings and every coarsened body.
 
+**Collision geometry** picks how those meshes collide. *One collider per mesh* (the default) gives every
+mesh its own collider with the **Collision approximation**. On a multi-part link the colliders of
+interlocking parts across a joint overlap by construction. *One convex hull per link* (`link_hull`)
+gives each link a single convex hull over all its collision meshes, computed during the export
+(`fusion2usd/collision.py`, no extra packages): its vertices are the meshes' extreme points in 64
+evenly spread directions, so it lies within the exact hull, within about 2.5 % of the link's size,
+and has at most 64 vertices, the default cap of Newton and PhysX. A link's `collision_separate`
+meshes stay colliders of their own (for example a foot's sole plate), and `collision: none` drops a
+link's colliders (for example a linkage's rods). A link's `collision_into: <link>` folds its meshes into that link's hull at
+the exported pose and gives it no collider (for example fingers into the palm). A link's `collision_primitive: box` or `capsule` replaces its hull
+with the smallest box or capsule on the hull's principal axes that contains every point of its meshes
+(primitive pairs are the cheapest contacts to compute).
+
+**No collisions within this many joints** (`filter_joint_distance`) writes a filtered pair for every two
+links at most that many joints apart, loop-closing joints included. The default, 1, filters each
+joint's own two links. 2 also covers the housings of compound joints (a two-axis waist, a three-axis
+hip, a universal joint), which sit two joints apart and touch by construction.
+
+To apply the collision geometry and filtering to an existing export without Fusion, run
+`python -m fusion2usd.rebake robot.usda --overrides overrides.json --filter-joint-distance 2` (needs
+`usd-core`). It writes the colliders, filtered pairs and ball-joint `armature`/`friction` that an export
+with *One convex hull per link* and that distance writes from the same overrides, and nothing else.
+
 ## Quick start
 
 1. Optional: select joints and run **Joint Properties** to set effort, velocity, gains and the like
@@ -102,7 +125,7 @@ The export warns when a design has motion links (Kamino) or closed loops with Fu
 | Closed loops | spanning tree; one joint per loop gets `excludeFromArticulation = true` (a multi-DOF one becomes a D6 joint, a ball on Newton a spherical joint) |
 | Motion links | mimic constraint on the follower joint |
 | Appearances | `UsdPreviewSurface` materials |
-| Collision | per-body meshes (coarser tessellation), `convexDecomposition` by default |
+| Collision | per-mesh colliders, `convexDecomposition` by default; or one convex hull per link (`link_hull`) |
 
 Joint axes and signs are **measured**: with *Probe joint axes* enabled, the exporter nudges every joint
 in Fusion, records how the parts actually move, and restores the pose. Fusion's documented axis
@@ -153,9 +176,9 @@ Properties come from three sources, in increasing priority:
 
 **Joint keys:** `effort` (aliases `torque`, `force`, `max_torque`), `velocity`, `stiffness` (`kp`),
 `damping` (`kd`), `armature`, `friction`, `actuated`, `drive_type`, `target`, `lower`, `upper`, `name`,
-`loop_closure`, `enabled`.
+`loop_closure`, `enabled`. `armature` and `friction` also apply to ball joints (each of their three rotations).
 
-**Link keys:** `name`, `mass`, `collision`, `base`. A `mass` on a body that Fusion gave no mass gets the
+**Link keys:** `name`, `mass`, `collision`, `collision_separate` (mesh names kept out of a link hull), `collision_into` (a link whose hull takes this link's meshes), `collision_primitive` (`box` or `capsule` in place of its hull), `base`. A `mass` on a body that Fusion gave no mass gets the
 inertia of a solid box over its meshes. `collision` accepts the approximation names in any case and
 with separators (`convex_hull`).
 

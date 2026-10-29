@@ -30,6 +30,11 @@ class CollisionApproximation(str, Enum):
     SDF = "sdf"
 
 
+class CollisionGeometry(str, Enum):
+    PER_MESH = "per_mesh"    # a collider per collision mesh, each with the collision approximation
+    LINK_HULL = "link_hull"  # one convex hull per link over its collision meshes (fusion2usd.collision)
+
+
 class MeshQuality(str, Enum):
     VISUAL = "visual"  # collision only: reuse the visual meshes
     LOW = "low"
@@ -70,6 +75,15 @@ class ExportOptions:
     export_visuals: bool = True
     export_collisions: bool = True
     collision_approximation: CollisionApproximation = CollisionApproximation.CONVEX_DECOMPOSITION
+    # link_hull: one convex hull per link, computed here, written as a convexHull mesh; a link's
+    # ``collision_separate`` meshes stay colliders of their own. A link's ``collision: none`` still drops its colliders.
+    collision_geometry: CollisionGeometry = CollisionGeometry.PER_MESH
+    # Support directions per link hull (fusion2usd.collision), so at most this many hull vertices: Newton and PhysX
+    # cap a convex hull at 64 by default and would otherwise decimate it their own way.
+    collision_hull_directions: int = 64
+    # Links at most this many joints apart (loop-closing joints included) get a filtered pair; 1: each joint's own.
+    # Compound joints (a waist, a hip, a universal joint) put housings that overlap by construction two joints apart.
+    filter_joint_distance: int = 1
     include_hidden: bool = False              # export bodies/occurrences whose light bulb is off
 
     # kinematics
