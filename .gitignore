@@ -8,3 +8,5 @@ build/
 dist/
 /out/
 .claude/
+tools/screws/AddMissingScrews/.vscode/
+tools/screws/AddMissingScrews/*_report.csv
