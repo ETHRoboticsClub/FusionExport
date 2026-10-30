@@ -70,6 +70,8 @@ class ExportOptions:
     export_visuals: bool = True
     export_collisions: bool = True
     collision_approximation: CollisionApproximation = CollisionApproximation.CONVEX_DECOMPOSITION
+    optimize_collisions: bool = True          # certified same-link reduction; keep uncertain geometry
+    collision_primitive_tolerance: float = 1e-5  # metres; inward-only fitting error (10 micrometres)
     include_hidden: bool = False              # export bodies/occurrences whose light bulb is off
 
     # kinematics

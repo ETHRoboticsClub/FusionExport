@@ -21,7 +21,7 @@ from enum import Enum
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from ..core.inertia import MassProperties
-from ..core.math3d import Transform, Vec3
+from ..core.math3d import Quat, Transform, Vec3
 
 
 class DofType(str, Enum):
@@ -119,6 +119,8 @@ class Mesh:
     normals: Optional[List[float]] = None  # per-vertex, same layout as points
     material: Optional[str] = None
 
+    primitive: Optional[Dict[str, Any]] = None  # certified collision-only analytic shape
+
     @property
     def vertex_count(self) -> int:
         return len(self.points) // 3
@@ -136,7 +138,11 @@ class Mesh:
             nrm = []
             for i in range(0, len(self.normals), 3):
                 nrm.extend(t.apply_vector(Vec3(self.normals[i], self.normals[i + 1], self.normals[i + 2])))
-        return Mesh(self.name, pts, list(self.indices), nrm, self.material)
+        primitive = None if self.primitive is None else dict(self.primitive)
+        if primitive is not None:
+            primitive["center"] = list(t.apply_point(Vec3.of(primitive["center"])))
+            primitive["rotation"] = list((t.rotation * Quat(*primitive["rotation"])).normalized().as_tuple())
+        return Mesh(self.name, pts, list(self.indices), nrm, self.material, primitive)
 
     def bounds(self) -> Tuple[Vec3, Vec3]:
         xs, ys, zs = self.points[0::3], self.points[1::3], self.points[2::3]

@@ -95,7 +95,8 @@ class ModelSerializer:
     # -- links
     @staticmethod
     def _mesh(m: Mesh) -> dict:
-        return {"name": m.name, "points": m.points, "indices": m.indices, "normals": m.normals, "material": m.material}
+        return {"name": m.name, "points": m.points, "indices": m.indices, "normals": m.normals,
+                "material": m.material, "primitive": m.primitive}
 
     def _link(self, l: Link) -> dict:
         mass = None

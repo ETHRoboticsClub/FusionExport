@@ -88,7 +88,7 @@ def test_collisions_reference_the_visual_meshes(tmp_path):
         link.collisions = []
     src = tmp_path / "g.model.json"
     ModelSerializer().save(model, str(src))
-    opts = ExportOptions(output_path=str(tmp_path / "r.usda"), write_isaaclab_cfg=False)
+    opts = ExportOptions(output_path=str(tmp_path / "r.usda"), write_isaaclab_cfg=False, optimize_collisions=False)
     Exporter(opts, actions=None).export(ModelFileSource(str(src)))
 
     text = (tmp_path / "r.usda").read_text()

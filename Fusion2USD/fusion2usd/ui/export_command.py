@@ -25,6 +25,7 @@ APPROX = [(a.value, a.value) for a in CollisionApproximation]
 FORMAT = [("Text (.usda)", "usda"), ("Binary (.usdc)", "usdc"), ("Text, meshes in a binary layer", "layered")]
 
 _FLAGS = (  # (input id, ExportOptions field, label)
+    ("optimize_collisions", "optimize_collisions", "Simplify collision shapes conservatively"),
     ("probe", "probe_joints", "Probe joint axes"),
     ("mimic", "export_mimic_joints", "Export motion links as mimic joints"),
     ("isaaclab", "write_isaaclab_cfg", "Write Isaac Lab config"),

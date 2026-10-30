@@ -88,6 +88,9 @@ class Exporter:
         pipeline = self._pipeline or default_pipeline(OverrideSet.load(opts.overrides_path))
         model = pipeline.run(model, PassContext(opts, report))
 
+        from .collision import optimize_collisions
+        model = optimize_collisions(model, opts, report)
+
         written = UsdWriter(opts, report).write(model, opts.output_path)
         report.outputs.extend(written)
         artifacts = ExportArtifacts(model, opts, report, usd_path=written[0], written=list(written))

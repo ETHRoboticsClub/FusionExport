@@ -173,6 +173,9 @@ class _StageWriter:
         names = NameRegistry()
         for mesh in meshes:
             name = names.claim(mesh.name, "collision")
+            if mesh.primitive is not None:
+                self._write_collision_primitive(scope, name, mesh.primitive)
+                continue
             visual = self.visual_paths.get(id(mesh))
             if visual is not None:  # reuse the visual geometry instead of storing it twice
                 m = scope.define(name, "Mesh")
@@ -182,6 +185,26 @@ class _StageWriter:
             if m is None:
                 continue
             self.engine.collision(m, approx)
+
+    @staticmethod
+    def _write_collision_primitive(parent: Prim, name: str, shape: dict) -> None:
+        kind = shape["kind"]
+        prim = parent.define(name, {"box": "Cube", "sphere": "Sphere", "capsule": "Capsule"}[kind])
+        _xform_attrs(prim, Transform(Quat(*shape["rotation"]), Vec3.of(shape["center"])))
+        if kind == "box":
+            prim.attr("size", "double", 1.0)
+            prim.attr("xformOp:scale", "double3", tuple(shape["size"]))
+            half = (0.5, 0.5, 0.5)
+        else:
+            r = shape["radius"]
+            prim.attr("radius", "double", r)
+            half = (r, r, r)
+            if kind == "capsule":
+                prim.attr("height", "double", shape["height"])
+                prim.attr("axis", "uniform token", "Z")
+                half = (r, r, r + shape["height"] / 2)
+        prim.attr("extent", "float3[]", [tuple(-x for x in half), half])
+        prim.apply("PhysicsCollisionAPI")
 
     def _write_mesh(self, parent: Prim, name: str, mesh: Mesh, visual: bool) -> Optional[Prim]:
         if not mesh.vertex_count or not mesh.triangle_count:

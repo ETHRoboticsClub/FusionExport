@@ -29,10 +29,29 @@ writes `.usda` and says so.
 | Binary (.usdc) | one `robot.usdc` |
 | Text, meshes in a binary layer | `robot.usda` with links, joints, physics and materials, sublayering `robot_meshes.usdc` with the meshes |
 
-Collision prims reference the visual meshes by default (**Collision mesh quality → Same as visual**), so
-the geometry is stored once and the simulator builds its hulls from it; pick a quality to export a
-separate, coarser collision mesh instead. **Max triangles per body** loosens Fusion's tessellation
-tolerances for bodies above the limit. The report lists the mesh settings and every coarsened body.
+**Simplify collision shapes conservatively** is enabled by default. Within each rigid link it removes
+exact duplicate meshes and geometry contained in a certified convex solid, and merges convex solids
+across matching planar faces only when their union is also certified convex. It never merges links.
+Overlapping solids without a matching interface, concave/open/nonmanifold meshes, and meshes beyond
+the verification budget are retained rather than guessed. Containment is not inferred from an AABB,
+so a screw inside a socket's bounding box is not considered inside its material.
+
+Certified boxes become native USD boxes; spheres and capsules are fitted **inside** the source solid,
+with at most **10 µm inward error** by default (`collision_primitive_tolerance`, in metres, in options
+JSON; zero disables inexact fits). Visual geometry, mass and inertia are unchanged. URDF uses native
+boxes/spheres and represents each capsule as a cylinder plus two spheres. Reports show removals,
+merges and primitive counts before simulator cooking. Set `optimize_collisions: false` or uncheck the
+option to retain the previous behavior. Explicit SDF/bounding-shape/mesh-simplification modes bypass
+this pass.
+
+This pass does not fill holes, but the simulator's existing convex approximation and contact margins
+can still cause contacts across socket clearances. Uncertified meshes are identified in the report;
+check the **cooked** colliders and relevant joint motion before relying on those clearances.
+
+Remaining collision meshes reference visual geometry when possible (**Collision mesh quality → Same
+as visual**); choose a quality to export separate, coarser collision meshes instead. **Max triangles
+per body** loosens Fusion's tessellation tolerances for bodies above the limit. These source-mesh
+approximations precede collision optimization and have their own geometric error.
 
 ## Quick start
 
@@ -102,7 +121,7 @@ The export warns when a design has motion links (Kamino) or closed loops with Fu
 | Closed loops | spanning tree; one joint per loop gets `excludeFromArticulation = true` (a multi-DOF one becomes a D6 joint, a ball on Newton a spherical joint) |
 | Motion links | mimic constraint on the follower joint |
 | Appearances | `UsdPreviewSurface` materials |
-| Collision | per-body meshes (coarser tessellation), `convexDecomposition` by default |
+| Collision | conservative per-link reduction, certified primitives, `convexDecomposition` for remaining meshes |
 
 Joint axes and signs are **measured**: with *Probe joint axes* enabled, the exporter nudges every joint
 in Fusion, records how the parts actually move, and restores the pose. Fusion's documented axis

@@ -165,6 +165,9 @@ class UrdfWriter:
             for mesh in meshes:
                 if mesh.triangle_count == 0:
                     continue
+                if kind == "collision" and mesh.primitive is not None:
+                    self._write_collision_primitive(el, mesh.name, mesh.primitive, to_urdf)
+                    continue
                 file_name = files.get(id(mesh))
                 if file_name is None:
                     file_name = files[id(mesh)] = f"{link.name}_{kind}_{mesh.name}.stl"
@@ -177,6 +180,27 @@ class UrdfWriter:
                 if kind == "visual" and mesh.material:
                     ET.SubElement(shape, "material", name=mesh.material)
         return written
+
+    @staticmethod
+    def _write_collision_primitive(parent, name, shape, to_urdf):
+        pose = to_urdf * Transform(Quat(*shape["rotation"]), Vec3.of(shape["center"]))
+
+        def emit(suffix, transform, kind, **attrs):
+            collision = ET.SubElement(parent, "collision", name=name + suffix)
+            _origin(collision, transform)
+            geometry = ET.SubElement(collision, "geometry")
+            ET.SubElement(geometry, kind, **attrs)
+
+        if shape["kind"] == "box":
+            emit("", pose, "box", size=" ".join(_fmt(x) for x in shape["size"]))
+        elif shape["kind"] == "sphere":
+            emit("", pose, "sphere", radius=_fmt(shape["radius"]))
+        else:
+            # URDF has no standard capsule: this union is the same occupied solid.
+            emit("_shaft", pose, "cylinder", radius=_fmt(shape["radius"]), length=_fmt(shape["height"]))
+            for suffix, sign in (("_cap0", -1), ("_cap1", 1)):
+                cap = pose * Transform(translation=Vec3(0, 0, sign * shape["height"] / 2))
+                emit(suffix, cap, "sphere", radius=_fmt(shape["radius"]))
 
     def _write_joint(self, robot: ET.Element, model: RobotModel, joint: Joint, frames: Dict[str, Transform]) -> None:
         parent_frame, child_frame = frames[joint.parent], frames[joint.child]
